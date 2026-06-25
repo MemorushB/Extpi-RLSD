@@ -8,6 +8,16 @@ VAL_FILE="${VAL_FILE:-${EXTPI_DATA_ROOT}/datasets/splits/frontier_mvp/matched_de
 MODEL_PATH="${MODEL_PATH:-Qwen/Qwen3-1.7B}"
 PROJECT_NAME="${PROJECT_NAME:-extpi_rlsd}"
 EXPERIMENT_NAME="${EXPERIMENT_NAME:-grpo_qwen3_1p7b_lora}"
+METHOD_NAME="${METHOD_NAME:-grpo}"
+SPLIT_MANIFEST="${SPLIT_MANIFEST:-${EXTPI_DATA_ROOT}/datasets/splits/frontier_mvp/split_manifest.json}"
+
+write_extpi_run_manifest "${EXPERIMENT_NAME}" \
+  --config_kv "method=${METHOD_NAME}" \
+  --config_kv "model_path=${MODEL_PATH}" \
+  --config_kv "train_file=${TRAIN_FILE}" \
+  --config_kv "val_file=${VAL_FILE}" \
+  --config_kv "total_training_steps=${TOTAL_TRAINING_STEPS:-5}" \
+  --config_kv "rollout_n=${ROLLOUT_N:-4}"
 
 python3 -m verl.trainer.main_ppo \
   algorithm.adv_estimator=grpo \

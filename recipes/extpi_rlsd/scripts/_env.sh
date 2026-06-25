@@ -21,3 +21,23 @@ export OMP_NUM_THREADS="${OMP_NUM_THREADS:-1}"
 export MKL_NUM_THREADS="${MKL_NUM_THREADS:-1}"
 export PYTORCH_CUDA_ALLOC_CONF="${PYTORCH_CUDA_ALLOC_CONF:-expandable_segments:True}"
 export EXTPI_DATA_ROOT="${EXTPI_DATA_ROOT:-/data/users/rchen/extpi-rlsd}"
+export EXTPI_REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
+
+write_extpi_run_manifest() {
+  local experiment_name="$1"
+  shift
+  local manifest_path="${RUN_MANIFEST:-${EXTPI_DATA_ROOT}/outputs/${experiment_name}/run_manifest.json}"
+  local manifest_args=(
+    --output "${manifest_path}"
+    --seed "${SEED:-42}"
+    --config_kv "experiment_name=${experiment_name}"
+    --config_kv "cuda_visible_devices=${CUDA_VISIBLE_DEVICES}"
+    --config_kv "nproc_per_node=${NPROC_PER_NODE}"
+    --config_kv "ngpus_per_node=${NGPUS_PER_NODE}"
+  )
+  if [ -n "${SPLIT_MANIFEST:-}" ]; then
+    manifest_args+=(--dataset_manifest "${SPLIT_MANIFEST}")
+  fi
+  python3 "${EXTPI_REPO_ROOT}/tools/extpi_rlsd/write_run_manifest.py" "${manifest_args[@]}" "$@"
+  echo "Wrote run manifest: ${manifest_path}" >&2
+}

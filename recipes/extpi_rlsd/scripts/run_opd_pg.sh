@@ -5,6 +5,7 @@ source "${SCRIPT_DIR}/_env.sh"
 
 TEACHER_MODEL="${TEACHER_MODEL:-Qwen/Qwen3-8B}"
 export EXPERIMENT_NAME="${EXPERIMENT_NAME:-opd_pg_qwen8b_sampled_k1}"
+export METHOD_NAME="${METHOD_NAME:-opd_pg_qwen8b}"
 
 "${SCRIPT_DIR}/run_grpo.sh" \
   distillation.enabled=True \

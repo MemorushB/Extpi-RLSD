@@ -1356,6 +1356,17 @@ class RayPPOTrainer:
         critic_output = DataProto.from_single_dict(data={}, meta_info={"metrics": output})
         return critic_output
 
+    def _before_actor_update(
+        self,
+        batch: DataProto,
+        metrics: dict[str, Any],
+        timing_raw: dict[str, Any],
+    ) -> DataProto:
+        """Allow recipes to add update-only tensors after advantage computation."""
+
+        del metrics, timing_raw
+        return batch
+
     def fit(self):
         """
         The training loop of PPO.
@@ -1640,6 +1651,8 @@ class RayPPOTrainer:
                         self.checkpoint_manager.update_weights(self.global_steps)
                     else:
                         # update actor
+                        with marked_timer("before_actor_update", timing_raw, color="red"):
+                            batch = self._before_actor_update(batch, metrics=metrics, timing_raw=timing_raw)
                         with marked_timer("update_actor", timing_raw, color="red"):
                             actor_output = self._update_actor(batch)
 

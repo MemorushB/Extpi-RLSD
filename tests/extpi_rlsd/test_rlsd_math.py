@@ -76,6 +76,26 @@ def test_negative_only_changes_only_negative_sequences():
     assert not torch.allclose(out[1], advantages[1])
 
 
+def test_rlsd_teacher_and_old_logprobs_are_stop_gradient():
+    advantages = torch.tensor([[1.0, -2.0]], requires_grad=True)
+    teacher = torch.tensor([[0.7, -0.3]], requires_grad=True)
+    old = torch.zeros_like(teacher, requires_grad=True)
+    mask = torch.ones_like(teacher)
+
+    out, _ = compute_rlsd_advantages(
+        teacher_log_probs=teacher,
+        student_old_log_probs=old,
+        advantages=advantages,
+        response_mask=mask,
+        config=RLSDConfig(lam=0.5, clip_range=0.2),
+    )
+    out.sum().backward()
+
+    assert teacher.grad is None
+    assert old.grad is None
+    assert advantages.grad is not None
+
+
 def test_opd_pg_advantages_are_clipped_and_detached():
     teacher = torch.tensor([[10.0, -10.0]], requires_grad=True)
     old = torch.zeros_like(teacher, requires_grad=True)
