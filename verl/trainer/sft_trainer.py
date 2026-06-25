@@ -41,7 +41,6 @@ from verl.utils.logger import log_with_rank
 from verl.utils.memory_utils import aggressive_empty_cache
 from verl.utils.profiler import log_gpu_memory_usage
 from verl.utils.tracking import Tracking
-from verl.workers.engine_workers import TrainingWorker
 
 logger = logging.getLogger(__file__)
 logger.setLevel(os.getenv("VERL_SFT_LOGGING_LEVEL", "WARN"))
@@ -157,7 +156,7 @@ class SFTTrainer:
             assert self.end_profile_step < 0
 
     def _build_engine(self):
-        from verl.workers.engine_workers import TrainingWorkerConfig
+        from verl.workers.engine_workers import TrainingWorker, TrainingWorkerConfig
         from verl.workers.utils.losses import sft_loss
 
         self.loss_fn = partial(sft_loss, config=None)
