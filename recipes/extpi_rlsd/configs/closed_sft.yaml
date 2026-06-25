@@ -1,0 +1,9 @@
+method: closed_sft
+inherits: common_qwen17b_lora.yaml
+sft:
+  learning_rate: 5.0e-6
+  epochs: 4
+  completion_only_loss: true
+  max_sequence_length: 4096
+  per_device_batch_size: 1
+  gradient_accumulation_steps: 32

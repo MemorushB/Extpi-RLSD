@@ -1,5 +1,16 @@
 **/*.pt
 **/checkpoints
+/checkpoints
+/cache
+/data
+/outputs
+checkpoints/
+cache/
+data/
+outputs/
+wandb/
+ray_results/
+.ray/
 **/wget-log
 **/_build/
 **/*.ckpt
@@ -124,6 +135,9 @@ ENV/
 
 # data
 *.parquet
+*.jsonl.tmp
+*.safetensors
+*.bin
 
 
 # local logs

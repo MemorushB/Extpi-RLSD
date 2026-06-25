@@ -16,6 +16,7 @@
 import torch
 from tensordict import TensorDict
 
+from verl.trainer.extpi_rlsd.rlsd import RLSDConfig, compute_rlsd_advantages
 from verl.trainer.ppo.core_algos import agg_loss, compute_value_loss, get_policy_loss_fn, kl_penalty
 from verl.utils import tensordict_utils as tu
 from verl.utils.dataset.dataset_utils import DatasetPadMode
@@ -84,6 +85,11 @@ def ppo_loss(config: ActorConfig, model_output, data: TensorDict, dp_group=None)
 
     # select fields and convert to padded tensor
     fields = ["response_mask", "old_log_probs", "advantages"]
+    rlsd_enabled = bool(config.policy_loss.get("rlsd_enabled", False))
+    if rlsd_enabled:
+        if "teacher_pi_log_probs" not in data:
+            raise ValueError("actor.policy_loss.rlsd_enabled=True requires teacher_pi_log_probs in the update batch")
+        fields.append("teacher_pi_log_probs")
     if "rollout_is_weights" in data:
         fields.append("rollout_is_weights")
     if "ref_log_prob" in data:
@@ -94,6 +100,19 @@ def ppo_loss(config: ActorConfig, model_output, data: TensorDict, dp_group=None)
     # compute policy loss
     old_log_prob = data["old_log_probs"]
     advantages = data["advantages"]
+    if rlsd_enabled:
+        advantages, rlsd_metrics = compute_rlsd_advantages(
+            teacher_log_probs=data["teacher_pi_log_probs"],
+            student_old_log_probs=old_log_prob,
+            advantages=advantages,
+            response_mask=response_mask,
+            config=RLSDConfig(
+                lam=float(config.policy_loss.get("rlsd_lambda", 0.5)),
+                clip_range=float(config.policy_loss.get("rlsd_reweight_clip_range", 0.2)),
+                negative_only=bool(config.policy_loss.get("rlsd_negative_only", False)),
+            ),
+        )
+        metrics.update(Metric.from_dict(rlsd_metrics, aggregation=AggregationType.MEAN))
     rollout_is_weights = data.get("rollout_is_weights", None)
 
     loss_agg_mode = config.loss_agg_mode

@@ -98,6 +98,10 @@ class PolicyLossConfig(BaseConfig):
     kl_cov_ratio: float = 0.0002
     ppo_kl_coef: float = 0.1
     rollout_correction: RolloutCorrectionConfig = field(default_factory=RolloutCorrectionConfig)
+    rlsd_enabled: bool = False
+    rlsd_lambda: float = 0.5
+    rlsd_reweight_clip_range: float = 0.2
+    rlsd_negative_only: bool = False
 
 
 @dataclass

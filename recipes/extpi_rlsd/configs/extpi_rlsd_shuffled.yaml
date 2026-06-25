@@ -1,0 +1,5 @@
+method: extpi_rlsd_shuffled
+inherits: extpi_rlsd.yaml
+pi_control:
+  shuffled: true
+  seed: 42

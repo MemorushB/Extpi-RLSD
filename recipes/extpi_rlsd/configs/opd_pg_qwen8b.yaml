@@ -1,0 +1,9 @@
+method: opd_pg_qwen8b
+inherits: common_qwen17b_lora.yaml
+distillation:
+  enabled: true
+  mode: sampled_token_pg
+  loss_mode: k1
+  teacher_model: Qwen/Qwen3-8B
+  use_task_rewards: false
+  logratio_clip_abs: 5.0

@@ -1,0 +1,6 @@
+method: grpo
+inherits: common_qwen17b_lora.yaml
+rlsd:
+  enabled: false
+distillation:
+  enabled: false

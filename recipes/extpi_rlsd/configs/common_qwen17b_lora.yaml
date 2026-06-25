@@ -1,0 +1,43 @@
+# Common Qwen3-1.7B LoRA defaults for the ExtPI-RLSD MVP.
+student_model: Qwen/Qwen3-1.7B
+external_teacher_model: Qwen/Qwen3-8B
+hardware: single_h200_gpu6
+precision: bf16
+student_thinking: false
+online_teacher_thinking: false
+offline_pi_teacher_thinking: true
+
+lora:
+  rank: 32
+  alpha: 64
+  dropout: 0.0
+  target_modules:
+    - q_proj
+    - k_proj
+    - v_proj
+    - o_proj
+    - gate_proj
+    - up_proj
+    - down_proj
+
+online:
+  prompts_per_update: 8
+  rollouts_per_prompt: 4
+  trajectories_per_update: 32
+  micro_batch_size_per_device: 1
+  ppo_epochs: 1
+  max_prompt_length: 2048
+  max_response_length: 1024
+  rollout_temperature: 1.0
+  rollout_top_p: 1.0
+  clip_ratio_low: 0.2
+  clip_ratio_high: 0.28
+  learning_rate: 3.0e-6
+  weight_decay: 0.01
+  max_grad_norm: 1.0
+
+paths:
+  data_root: /data/users/rchen/extpi-rlsd
+  train_file: data/mvp_train.parquet
+  val_file: data/matched_dev.parquet
+  reward_function: recipes/extpi_rlsd/rewards/math_verify_reward.py:compute_score

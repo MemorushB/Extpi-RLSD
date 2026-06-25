@@ -3,6 +3,17 @@
 > These instructions apply to **all** AI-assisted contributions to `verl-project/verl`.
 > Breaching these guidelines can result in automatic banning.
 
+## ExtPI-RLSD Overlay
+
+- Respond to user-facing messages in Chinese unless explicitly requested otherwise.
+- Write code comments and repository documentation in English unless explicitly requested otherwise.
+- Store large files under `/data/users/rchen/extpi-rlsd/` and symlink them into the project.
+- Recipe scripts default to `CUDA_VISIBLE_DEVICES=6`; do not use other GPUs unless the user explicitly says so.
+- Prefer upstream verl extension points; do not copy an entire PPO trainer for ExtPI-RLSD.
+- Do not decode and re-tokenize student responses for teacher scoring.
+- PI traces must never enter student rollout prompts.
+- Missing teacher scores in RLSD mode must raise an error rather than falling back to GRPO.
+
 ## 1. Contribution Policy (Mandatory)
 
 ### Duplicate-work checks
