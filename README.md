@@ -166,6 +166,26 @@ The matched-dev evaluator defaults to Avg@4 with fixed prompt-seed pairs
 `0,1,2,3` and `max_new_tokens=4096`. Override with `EVAL_SEEDS` only when a run
 manifest records the change.
 
+Prepare and run the official AIME/HMMT evaluation pipeline:
+
+```bash
+bash recipes/extpi_rlsd/scripts/04_prepare_official_eval_data.sh
+
+MODEL_PATH=/path/to/base_model \
+CHECKPOINT_PATH=/path/to/checkpoint \
+RUN_NAME=extpi_rlsd \
+CHECKPOINT_NAME=step_100 \
+bash recipes/extpi_rlsd/scripts/run_official_math_eval.sh
+```
+
+This writes normalized `aime24`, `aime25`, and `hmmt25` eval files under
+`${EXTPI_DATA_ROOT}/datasets/eval/official_math` and writes per-dataset JSON
+results plus `summary.csv` / `summary.md` under
+`${EXTPI_DATA_ROOT}/outputs/eval_official/${RUN_NAME}`. Official math eval
+defaults to OPSD-compatible prompts, `Avg@12`, fixed seeds `0..11`,
+`max_new_tokens=38912`, and non-thinking Qwen3 generation unless
+`EVAL_ENABLE_THINKING=1` is set.
+
 ## WandB Logging
 
 Training scripts default to console + WandB logging:

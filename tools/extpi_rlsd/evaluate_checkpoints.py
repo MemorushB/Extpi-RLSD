@@ -288,7 +288,12 @@ def _evaluate_vllm(args: argparse.Namespace, items: list[EvalItem]) -> list[dict
     tokenizer = AutoTokenizer.from_pretrained(args.model, trust_remote_code=args.trust_remote_code)
     prompts = build_prompts(tokenizer, items, enable_thinking=args.enable_thinking)
     prompt_token_counts = [len(tokenizer.encode(prompt, add_special_tokens=False)) for prompt in prompts]
-    llm = LLM(model=model_path, trust_remote_code=args.trust_remote_code, tensor_parallel_size=1)
+    llm = LLM(
+        model=model_path,
+        trust_remote_code=args.trust_remote_code,
+        tensor_parallel_size=args.tensor_parallel_size,
+        gpu_memory_utilization=args.gpu_memory_utilization,
+    )
     greedy_outputs = llm.generate(prompts, SamplingParams(temperature=0.0, max_tokens=args.max_new_tokens, n=1))
     seeds = parse_seeds(args.seeds, args.num_samples)
     outputs_by_seed = [
@@ -355,6 +360,9 @@ def main() -> None:
     parser.add_argument("--enable_thinking", action="store_true")
     parser.add_argument("--trust_remote_code", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--attn_implementation", default="flash_attention_2")
+    parser.add_argument("--dataset_name", default=None)
+    parser.add_argument("--tensor_parallel_size", type=int, default=1)
+    parser.add_argument("--gpu_memory_utilization", type=float, default=0.9)
     args = parser.parse_args()
 
     items = load_eval_items(args.eval_file, max_rows=args.max_rows)
@@ -365,6 +373,7 @@ def main() -> None:
         scored_items=scored_items,
     )
     payload["eval_file"] = args.eval_file
+    payload["dataset"] = args.dataset_name or Path(args.eval_file).stem
     payload["model"] = args.model
     payload["checkpoint_path"] = args.checkpoint
     payload["adapter_path"] = args.adapter_path

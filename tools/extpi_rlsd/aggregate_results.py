@@ -11,6 +11,7 @@ from pathlib import Path
 FIELDS = [
     "run",
     "checkpoint",
+    "dataset",
     "avg",
     "majority",
     "pass",
