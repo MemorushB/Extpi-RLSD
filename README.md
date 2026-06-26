@@ -168,26 +168,32 @@ manifest records the change.
 
 ## WandB Logging
 
-Training scripts default to console-only logging:
+Training scripts default to console + WandB logging:
 
 ```bash
-TRAINER_LOGGER='["console"]'
+TRAINER_LOGGER='["console","wandb"]'
 ```
 
-Enable WandB for any single-card or multi-GPU training entrypoint with:
+Use any single-card or multi-GPU training entrypoint directly:
 
 ```bash
-EXTPI_ENABLE_WANDB=1 \
 WANDB_ENTITY=... \
 WANDB_MODE=online \
 TOTAL_TRAINING_STEPS=5 \
 bash recipes/extpi_rlsd/scripts/run_extpi_rlsd.sh
 ```
 
+For machines without WandB credentials, set `WANDB_MODE=offline` or disable
+WandB for that run:
+
+```bash
+EXTPI_ENABLE_WANDB=0 bash recipes/extpi_rlsd/scripts/run_grpo.sh
+```
+
 You can also pass the verl logger list directly:
 
 ```bash
-TRAINER_LOGGER='["console","wandb"]' bash recipes/extpi_rlsd/scripts/run_grpo.sh
+TRAINER_LOGGER='["console"]' bash recipes/extpi_rlsd/scripts/run_grpo.sh
 ```
 
 Local WandB files are written under

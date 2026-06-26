@@ -87,14 +87,13 @@ def test_env_multi_unsets_single_card_ray_override():
     assert result.stdout == "2:2:unset"
 
 
-def test_env_single_card_enables_wandb_logger(tmp_path):
+def test_env_single_card_enables_wandb_logger_by_default(tmp_path):
     env = os.environ.copy()
     env.update(
         {
             "CUDA_VISIBLE_DEVICES": "6",
             "NPROC_PER_NODE": "1",
             "NGPUS_PER_NODE": "1",
-            "EXTPI_ENABLE_WANDB": "1",
             "EXTPI_DATA_ROOT": str(tmp_path),
         }
     )
@@ -109,3 +108,22 @@ def test_env_single_card_enables_wandb_logger(tmp_path):
     assert logger_value == '["console","wandb"]'
     assert wandb_dir == str(tmp_path / "outputs" / "wandb")
     assert (tmp_path / "outputs" / "wandb").is_dir()
+
+
+def test_env_single_card_can_disable_default_wandb(tmp_path):
+    env = os.environ.copy()
+    env.update(
+        {
+            "CUDA_VISIBLE_DEVICES": "6",
+            "NPROC_PER_NODE": "1",
+            "NGPUS_PER_NODE": "1",
+            "EXTPI_ENABLE_WANDB": "0",
+            "EXTPI_DATA_ROOT": str(tmp_path),
+        }
+    )
+    cmd = f"source {SCRIPT_DIR / '_env.sh'}; printf \"%s\" \"$TRAINER_LOGGER\""
+    result = subprocess.run(["bash", "-lc", cmd], env=env, capture_output=True, text=True, check=False)
+
+    assert result.returncode == 0
+    assert result.stdout == '["console"]'
+    assert not (tmp_path / "outputs" / "wandb").exists()

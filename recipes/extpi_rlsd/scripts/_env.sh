@@ -25,12 +25,12 @@ export EXTPI_REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 export PYTHONPATH="${EXTPI_REPO_ROOT}${PYTHONPATH:+:${PYTHONPATH}}"
 
 if [ -z "${TRAINER_LOGGER:-}" ]; then
-  case "${EXTPI_ENABLE_WANDB:-0}" in
-    1|true|TRUE|yes|YES)
-      export TRAINER_LOGGER='["console","wandb"]'
+  case "${EXTPI_ENABLE_WANDB:-1}" in
+    0|false|FALSE|no|NO)
+      export TRAINER_LOGGER='["console"]'
       ;;
     *)
-      export TRAINER_LOGGER='["console"]'
+      export TRAINER_LOGGER='["console","wandb"]'
       ;;
   esac
 fi
