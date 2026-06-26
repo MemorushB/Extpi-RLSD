@@ -151,6 +151,8 @@ def main() -> None:
             "revision": args.revision,
             "split": args.split,
             "input_jsonl": args.input_jsonl,
+            "eval_jsonl": args.eval_jsonl,
+            "eval_problem_count": len(eval_problems),
             "stats": dict(stats),
             "output_files": {
                 "all_clean": str(output_dir / "all_clean.jsonl"),

@@ -15,8 +15,8 @@ def eligible_frontier(row: dict, relaxed: bool = False) -> bool:
     p_pi = float(row.get("p_PI", row.get("pPI", row.get("pTPI", 0.0))) or 0.0)
     uplift = p_pi - p_plain
     verified = bool(row.get("qwen8b_pi_verified", row.get("pi_trace_verified", True)))
-    not_truncated = not bool(row.get("student_completion_truncated", False))
-    if not verified or not_truncated:
+    truncated = bool(row.get("student_completion_truncated", False))
+    if not verified or truncated:
         return False
     if relaxed:
         return 0.1 <= p_plain <= 0.75 and uplift > 0

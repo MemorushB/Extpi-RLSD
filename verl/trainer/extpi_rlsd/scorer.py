@@ -193,8 +193,6 @@ class InlineHFTeacherScorer:
         self.device = torch.device(device)
         self.disable_adapter = disable_adapter
         self.model.eval()
-        for parameter in self.model.parameters():
-            parameter.requires_grad_(False)
 
     def score(self, request: TeacherScoreRequest) -> TeacherScoreOutput:
         tensors = build_causal_score_inputs(

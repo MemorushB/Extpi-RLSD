@@ -25,8 +25,8 @@ The recipe compares Qwen3-1.7B LoRA under a single-GPU setup:
 The ExtPI-RLSD hook builds scorer-only PI prompts, appends the original student
 response token IDs without decode/re-tokenize, scores them under the
 base-no-adapter self-teacher, and writes `teacher_pi_log_probs` into the actor
-update batch. The actor loss fails fast when RLSD is enabled and that tensor is
-missing.
+update batch. The MVP only supports `teacher_update_mode=base_no_adapter`. The
+actor loss fails fast when RLSD is enabled and that tensor is missing.
 
 ## Repository Layout
 
@@ -73,7 +73,10 @@ Prepare OPSD, generate verified Qwen3-8B PI traces, attach recipient uplift
 statistics, and build frontier splits:
 
 ```bash
-bash recipes/extpi_rlsd/scripts/00_prepare_dataset.sh
+bash recipes/extpi_rlsd/scripts/00_prepare_dataset.sh \
+  --eval_jsonl /path/to/aime24.jsonl \
+  --eval_jsonl /path/to/aime25.jsonl \
+  --eval_jsonl /path/to/hmmt25.jsonl
 bash recipes/extpi_rlsd/scripts/01_generate_qwen8b_pi.sh
 python3 tools/extpi_rlsd/compute_recipient_uplift.py \
   --input_jsonl /data/users/rchen/extpi-rlsd/datasets/opsd_clean/all_clean_qwen8b_pi.jsonl \
@@ -83,6 +86,10 @@ python3 tools/extpi_rlsd/compute_recipient_uplift.py \
 bash recipes/extpi_rlsd/scripts/03_build_frontier.sh
 ```
 
+For local development only, `ALLOW_MISSING_EVAL_CONTAMINATION=1` lets
+`00_prepare_dataset.sh` run without eval contamination files. Official splits
+must not use that override.
+
 Closed-teacher SFT data uses an OpenAI-compatible endpoint:
 
 ```bash
@@ -90,6 +97,7 @@ export CLOSED_TEACHER_BASE_URL=...
 export CLOSED_TEACHER_API_KEY=...
 export CLOSED_TEACHER_MODEL=...
 bash recipes/extpi_rlsd/scripts/02_generate_closed_sft.sh
+bash recipes/extpi_rlsd/scripts/02b_build_closed_sft_parquet.sh
 ```
 
 ## Run Entrypoints
@@ -104,9 +112,22 @@ TOTAL_TRAINING_STEPS=5 bash recipes/extpi_rlsd/scripts/run_extpi_rlsd.sh
 TOTAL_TRAINING_STEPS=5 bash recipes/extpi_rlsd/scripts/run_extpi_rlsd_shuffled.sh
 ```
 
-`run_opd_pg.sh` is the Baseline 2 entrypoint. `run_extpi_rlsd.sh` uses
+`run_opd_pg.sh` is the Baseline 2 entrypoint. It uses verl's sampled-token
+distillation teacher-service path and performs a tokenizer compatibility
+preflight before training. `run_extpi_rlsd.sh` uses
 `verl.trainer.extpi_rlsd.main_extpi_rlsd`, which runs the legacy PPO trainer
 hook that materializes `teacher_pi_log_probs`.
+
+Evaluate one checkpoint and aggregate result JSON files:
+
+```bash
+CHECKPOINT_PATH=/path/to/checkpoint \
+RUN_NAME=extpi_rlsd \
+CHECKPOINT_NAME=step_100 \
+bash recipes/extpi_rlsd/scripts/run_eval_checkpoint.sh
+
+bash recipes/extpi_rlsd/scripts/evaluate_all.sh
+```
 
 ## Tests
 

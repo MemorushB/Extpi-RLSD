@@ -11,7 +11,13 @@ EXPERIMENT_NAME="${EXPERIMENT_NAME:-grpo_qwen3_1p7b_lora}"
 METHOD_NAME="${METHOD_NAME:-grpo}"
 SPLIT_MANIFEST="${SPLIT_MANIFEST:-${EXTPI_DATA_ROOT}/datasets/splits/frontier_mvp/split_manifest.json}"
 
+manifest_model_args=(--model "student=${MODEL_PATH}")
+if [ -n "${TEACHER_MODEL:-}" ]; then
+  manifest_model_args+=(--model "teacher=${TEACHER_MODEL}")
+fi
+
 write_extpi_run_manifest "${EXPERIMENT_NAME}" \
+  "${manifest_model_args[@]}" \
   --config_kv "method=${METHOD_NAME}" \
   --config_kv "model_path=${MODEL_PATH}" \
   --config_kv "train_file=${TRAIN_FILE}" \
@@ -20,11 +26,12 @@ write_extpi_run_manifest "${EXPERIMENT_NAME}" \
   --config_kv "rollout_n=${ROLLOUT_N:-4}"
 
 python3 -m verl.trainer.main_ppo \
+  trainer.use_v1=False \
   algorithm.adv_estimator=grpo \
   algorithm.use_kl_in_reward=False \
   data.train_files="${TRAIN_FILE}" \
   data.val_files="${VAL_FILE}" \
-  data.train_batch_size="${TRAIN_BATCH_SIZE:-32}" \
+  data.train_batch_size="${TRAIN_BATCH_SIZE:-8}" \
   data.max_prompt_length="${MAX_PROMPT_LENGTH:-2048}" \
   data.max_response_length="${MAX_RESPONSE_LENGTH:-1024}" \
   data.filter_overlong_prompts=True \
@@ -37,7 +44,7 @@ python3 -m verl.trainer.main_ppo \
   actor_rollout_ref.model.lora_rank=32 \
   actor_rollout_ref.model.lora_alpha=64 \
   actor_rollout_ref.actor.optim.lr="${ACTOR_LR:-3e-6}" \
-  actor_rollout_ref.actor.ppo_mini_batch_size="${PPO_MINI_BATCH_SIZE:-32}" \
+  actor_rollout_ref.actor.ppo_mini_batch_size="${PPO_MINI_BATCH_SIZE:-8}" \
   actor_rollout_ref.actor.ppo_micro_batch_size_per_gpu=1 \
   actor_rollout_ref.actor.clip_ratio_low=0.2 \
   actor_rollout_ref.actor.clip_ratio_high=0.28 \

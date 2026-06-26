@@ -10,9 +10,10 @@ This recipe compares Qwen3-1.7B LoRA under:
 
 The MVP includes reusable data tools, exact-token scorer helpers, worker-side
 RLSD loss support, and a legacy PPO hook that materializes
-`teacher_pi_log_probs` after rollout and before actor update. The actor loss
-fails fast when `rlsd_enabled=True` and that tensor is missing, so there is no
-silent GRPO fallback.
+`teacher_pi_log_probs` after rollout and before actor update. The current MVP
+only supports `teacher_update_mode=base_no_adapter`. The actor loss fails fast
+when `rlsd_enabled=True` and that tensor is missing, so there is no silent GRPO
+fallback.
 
 ## Local Storage
 
@@ -41,7 +42,10 @@ changed.
 ## Data Flow
 
 ```bash
-bash recipes/extpi_rlsd/scripts/00_prepare_dataset.sh
+bash recipes/extpi_rlsd/scripts/00_prepare_dataset.sh \
+  --eval_jsonl /path/to/aime24.jsonl \
+  --eval_jsonl /path/to/aime25.jsonl \
+  --eval_jsonl /path/to/hmmt25.jsonl
 bash recipes/extpi_rlsd/scripts/01_generate_qwen8b_pi.sh
 # Generate plain/PI recipient completion JSONL files externally, then attach uplift:
 python3 tools/extpi_rlsd/compute_recipient_uplift.py \
@@ -52,6 +56,9 @@ python3 tools/extpi_rlsd/compute_recipient_uplift.py \
 bash recipes/extpi_rlsd/scripts/03_build_frontier.sh
 ```
 
+Set `ALLOW_MISSING_EVAL_CONTAMINATION=1` only for local development runs that
+intentionally skip eval contamination filtering.
+
 Closed-teacher SFT data requires:
 
 ```bash
@@ -59,6 +66,7 @@ export CLOSED_TEACHER_BASE_URL=...
 export CLOSED_TEACHER_API_KEY=...
 export CLOSED_TEACHER_MODEL=...
 bash recipes/extpi_rlsd/scripts/02_generate_closed_sft.sh
+bash recipes/extpi_rlsd/scripts/02b_build_closed_sft_parquet.sh
 ```
 
 ## Smoke Commands
@@ -75,6 +83,10 @@ Direct sampled-token OPD-PG smoke:
 TOTAL_TRAINING_STEPS=5 bash recipes/extpi_rlsd/scripts/run_opd_pg.sh
 ```
 
+This baseline uses verl's distillation teacher-service path for sampled-token
+K1 OPD-PG and runs a tokenizer compatibility preflight. It is not a
+full-vocabulary or top-k GKD baseline.
+
 ExtPI-RLSD smoke:
 
 ```bash
@@ -88,6 +100,17 @@ Run the local contract tests without starting training:
 
 ```bash
 pytest tests/extpi_rlsd
+```
+
+Evaluate one checkpoint and aggregate JSON outputs:
+
+```bash
+CHECKPOINT_PATH=/path/to/checkpoint \
+RUN_NAME=extpi_rlsd \
+CHECKPOINT_NAME=step_100 \
+bash recipes/extpi_rlsd/scripts/run_eval_checkpoint.sh
+
+bash recipes/extpi_rlsd/scripts/evaluate_all.sh
 ```
 
 ## Public Claims Boundary

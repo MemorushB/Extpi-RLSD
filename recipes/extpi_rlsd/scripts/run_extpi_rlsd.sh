@@ -14,6 +14,7 @@ RLSD_CLIP_RANGE="${RLSD_CLIP_RANGE:-0.2}"
 TEACHER_MAX_PROMPT_LENGTH="${TEACHER_MAX_PROMPT_LENGTH:-2048}"
 
 write_extpi_run_manifest "${EXPERIMENT_NAME}" \
+  --model "student=${MODEL_PATH}" \
   --config_kv "method=extpi_rlsd" \
   --config_kv "model_path=${MODEL_PATH}" \
   --config_kv "train_file=${TRAIN_FILE}" \
@@ -31,7 +32,7 @@ python3 -m verl.trainer.extpi_rlsd.main_extpi_rlsd \
   algorithm.use_kl_in_reward=False \
   data.train_files="${TRAIN_FILE}" \
   data.val_files="${VAL_FILE}" \
-  data.train_batch_size="${TRAIN_BATCH_SIZE:-32}" \
+  data.train_batch_size="${TRAIN_BATCH_SIZE:-8}" \
   data.max_prompt_length="${MAX_PROMPT_LENGTH:-2048}" \
   data.max_response_length="${MAX_RESPONSE_LENGTH:-1024}" \
   data.filter_overlong_prompts=True \
@@ -44,7 +45,7 @@ python3 -m verl.trainer.extpi_rlsd.main_extpi_rlsd \
   actor_rollout_ref.model.lora_rank=32 \
   actor_rollout_ref.model.lora_alpha=64 \
   actor_rollout_ref.actor.optim.lr="${ACTOR_LR:-3e-6}" \
-  actor_rollout_ref.actor.ppo_mini_batch_size="${PPO_MINI_BATCH_SIZE:-32}" \
+  actor_rollout_ref.actor.ppo_mini_batch_size="${PPO_MINI_BATCH_SIZE:-8}" \
   actor_rollout_ref.actor.ppo_micro_batch_size_per_gpu=1 \
   actor_rollout_ref.actor.clip_ratio_low=0.2 \
   actor_rollout_ref.actor.clip_ratio_high=0.28 \

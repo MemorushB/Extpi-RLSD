@@ -89,14 +89,19 @@ def test_extpi_hook_injects_teacher_pi_log_probs_from_ref_path():
     )
 
     def fake_compute_ref_log_prob(score_batch):
-        assert score_batch.batch["responses"].tolist() == [[11, 12, 0], [21, 22, 23]]
-        return DataProto.from_dict(tensors={"ref_log_prob": torch.full((2, 3), 0.75)})
+        score_tensors = score_batch.batch
+        prefix_width = score_tensors["prompts"].shape[1]
+        assert score_tensors["responses"].tolist() == [[11, 12, 0], [21, 22, 23]]
+        assert torch.equal(score_tensors["input_ids"][:, prefix_width:], score_tensors["responses"])
+        ref_log_prob = score_tensors["input_ids"][:, prefix_width:].float() / 100
+        return DataProto.from_dict(tensors={"ref_log_prob": ref_log_prob})
 
     trainer._compute_ref_log_prob = fake_compute_ref_log_prob
     metrics = {}
     out = trainer._before_actor_update(_source_batch(), metrics=metrics, timing_raw={})
 
-    assert out.batch["teacher_pi_log_probs"].tolist() == [[0.75, 0.75, 0.0], [0.75, 0.75, 0.75]]
+    expected = torch.tensor([[0.11, 0.12, 0.0], [0.21, 0.22, 0.23]])
+    assert torch.allclose(out.batch["teacher_pi_log_probs"], expected)
     assert metrics["extpi/pi_teacher_response_tokens"] == 5.0
     assert "extpi/teacher_pi_delta_mean" in metrics
 

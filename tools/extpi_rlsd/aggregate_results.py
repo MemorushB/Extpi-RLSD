@@ -18,6 +18,13 @@ FIELDS = [
     "format_rate",
     "truncation_rate",
     "mean_response_length",
+    "group_variance",
+    "all_correct_rate",
+    "all_wrong_rate",
+    "prompt_tokens",
+    "completion_tokens",
+    "total_samples",
+    "privacy_leakage_rate",
 ]
 
 
