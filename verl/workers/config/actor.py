@@ -102,6 +102,7 @@ class PolicyLossConfig(BaseConfig):
     rlsd_lambda: float = 0.5
     rlsd_reweight_clip_range: float = 0.2
     rlsd_negative_only: bool = False
+    rlsd_delta_student_logp_source: str = "current"
     opd_pg_enabled: bool = False
     opd_logratio_clip_abs: float = 5.0
 

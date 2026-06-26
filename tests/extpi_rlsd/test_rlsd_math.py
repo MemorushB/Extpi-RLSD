@@ -11,7 +11,7 @@ def test_lambda_zero_reproduces_grpo_advantages():
 
     out, metrics = compute_rlsd_advantages(
         teacher_log_probs=teacher,
-        student_old_log_probs=old,
+        student_log_probs=old,
         advantages=advantages,
         response_mask=mask,
         config=RLSDConfig(lam=0.0, clip_range=0.2),
@@ -28,7 +28,7 @@ def test_equal_teacher_student_logprobs_keep_weights_at_one():
 
     out, metrics = compute_rlsd_advantages(
         teacher_log_probs=old,
-        student_old_log_probs=old,
+        student_log_probs=old,
         advantages=advantages,
         response_mask=mask,
         config=RLSDConfig(lam=0.5, clip_range=0.2),
@@ -46,7 +46,7 @@ def test_rlsd_preserves_sign_and_masks_padding():
 
     out, metrics = compute_rlsd_advantages(
         teacher_log_probs=teacher,
-        student_old_log_probs=old,
+        student_log_probs=old,
         advantages=advantages,
         response_mask=mask,
         config=RLSDConfig(lam=0.5, clip_range=0.2),
@@ -66,7 +66,7 @@ def test_negative_only_changes_only_negative_sequences():
 
     out, _ = compute_rlsd_advantages(
         teacher_log_probs=teacher,
-        student_old_log_probs=old,
+        student_log_probs=old,
         advantages=advantages,
         response_mask=mask,
         config=RLSDConfig(lam=0.5, clip_range=0.2, negative_only=True),
@@ -84,7 +84,7 @@ def test_rlsd_teacher_and_old_logprobs_are_stop_gradient():
 
     out, _ = compute_rlsd_advantages(
         teacher_log_probs=teacher,
-        student_old_log_probs=old,
+        student_log_probs=old,
         advantages=advantages,
         response_mask=mask,
         config=RLSDConfig(lam=0.5, clip_range=0.2),
@@ -104,7 +104,7 @@ def test_rlsd_large_log_weights_are_clipped_before_metrics():
 
     out, metrics = compute_rlsd_advantages(
         teacher_log_probs=teacher,
-        student_old_log_probs=old,
+        student_log_probs=old,
         advantages=advantages,
         response_mask=mask,
         config=RLSDConfig(lam=0.5, clip_range=0.2),
@@ -127,7 +127,7 @@ def test_rlsd_rejects_non_finite_valid_inputs():
     try:
         compute_rlsd_advantages(
             teacher_log_probs=teacher,
-            student_old_log_probs=old,
+            student_log_probs=old,
             advantages=advantages,
             response_mask=mask,
             config=RLSDConfig(lam=0.5, clip_range=0.2),

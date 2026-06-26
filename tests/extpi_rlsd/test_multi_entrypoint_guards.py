@@ -38,6 +38,7 @@ def test_actor_yaml_has_extpi_policy_loss_keys():
         "rlsd_lambda",
         "rlsd_reweight_clip_range",
         "rlsd_negative_only",
+        "rlsd_delta_student_logp_source",
         "opd_pg_enabled",
         "opd_logratio_clip_abs",
     ):

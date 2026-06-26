@@ -43,7 +43,7 @@ def _masked_std(value: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
 def compute_rlsd_advantages(
     *,
     teacher_log_probs: torch.Tensor,
-    student_old_log_probs: torch.Tensor,
+    student_log_probs: torch.Tensor,
     advantages: torch.Tensor,
     response_mask: torch.Tensor,
     config: RLSDConfig,
@@ -51,7 +51,7 @@ def compute_rlsd_advantages(
     """Reweight GRPO advantages using privileged teacher evidence.
 
     Formula:
-        delta_t = stopgrad(teacher_pi_logp_t - student_old_logp_t)
+        delta_t = stopgrad(teacher_pi_logp_t - student_logp_t)
         weight_t = exp(sign(A_t) * delta_t)
         weight_t = clamp(weight_t, 1 - eps, 1 + eps)
         A'_t = A_t * ((1 - lambda) + lambda * weight_t)
@@ -61,20 +61,20 @@ def compute_rlsd_advantages(
     """
 
     config.validate()
-    if not (teacher_log_probs.shape == student_old_log_probs.shape == advantages.shape == response_mask.shape):
+    if not (teacher_log_probs.shape == student_log_probs.shape == advantages.shape == response_mask.shape):
         raise ValueError(
-            "teacher_log_probs, student_old_log_probs, advantages, and response_mask must share the same shape"
+            "teacher_log_probs, student_log_probs, advantages, and response_mask must share the same shape"
         )
 
     mask = _as_mask(response_mask, advantages)
-    delta = teacher_log_probs.detach() - student_old_log_probs.detach()
+    delta = teacher_log_probs.detach() - student_log_probs.detach()
     sign_adv = torch.sign(advantages.detach())
     signed_delta = (sign_adv * delta).detach()
     valid = mask.bool()
     if valid.any():
         for name, tensor in {
             "teacher_log_probs": teacher_log_probs.detach(),
-            "student_old_log_probs": student_old_log_probs.detach(),
+            "student_log_probs": student_log_probs.detach(),
             "advantages": advantages.detach(),
             "signed_delta": signed_delta,
         }.items():

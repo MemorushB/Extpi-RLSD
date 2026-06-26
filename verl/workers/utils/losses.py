@@ -108,9 +108,19 @@ def ppo_loss(config: ActorConfig, model_output, data: TensorDict, dp_group=None)
     old_log_prob = data["old_log_probs"]
     advantages = data["advantages"]
     if rlsd_enabled:
+        rlsd_delta_source = str(config.policy_loss.get("rlsd_delta_student_logp_source", "current")).lower()
+        if rlsd_delta_source == "current":
+            rlsd_student_log_probs = log_prob.detach()
+        elif rlsd_delta_source == "old":
+            rlsd_student_log_probs = old_log_prob
+        else:
+            raise ValueError(
+                "actor.policy_loss.rlsd_delta_student_logp_source must be 'current' or 'old', "
+                f"got {rlsd_delta_source!r}"
+            )
         advantages, rlsd_metrics = compute_rlsd_advantages(
             teacher_log_probs=data["teacher_pi_log_probs"],
-            student_old_log_probs=old_log_prob,
+            student_log_probs=rlsd_student_log_probs,
             advantages=advantages,
             response_mask=response_mask,
             config=RLSDConfig(

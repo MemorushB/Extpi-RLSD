@@ -87,6 +87,9 @@ policy_loss:
   # Whether RLSD only reweights negative-advantage sequences
   rlsd_negative_only: false
 
+  # Student logprob source for RLSD delta: current or old
+  rlsd_delta_student_logp_source: current
+
   # Whether to enable sampled-token OPD-PG
   opd_pg_enabled: false
 
