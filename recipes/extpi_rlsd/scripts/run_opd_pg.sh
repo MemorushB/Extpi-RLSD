@@ -19,7 +19,6 @@ python3 "${EXTPI_REPO_ROOT}/tools/extpi_rlsd/check_tokenizer_compat.py" \
 "${SCRIPT_DIR}/run_grpo.sh" \
   actor_rollout_ref.actor.policy_loss.opd_pg_enabled=True \
   actor_rollout_ref.actor.policy_loss.opd_logratio_clip_abs="${OPD_LOGRATIO_CLIP_ABS:-5.0}" \
-  ray_kwargs.ray_init.runtime_env.env_vars.RAY_EXPERIMENTAL_NOSET_CUDA_VISIBLE_DEVICES=1 \
   +extpi_rlsd.direct_opd_teacher_backend=inline_external_hf \
   +extpi_rlsd.direct_opd_teacher_model_path="${TEACHER_MODEL}" \
   +extpi_rlsd.direct_opd_teacher_micro_batch_size=1 \

@@ -5,6 +5,7 @@
 
 ## ExtPI-RLSD Overlay
 
+- Use "extpi-RLSD" conda environment this project. Do not use other environments unless the user explicitly says so.
 - Respond to user-facing messages in Chinese unless explicitly requested otherwise.
 - Write code comments and repository documentation in English unless explicitly requested otherwise.
 - Store large files under `/data/users/rchen/extpi-rlsd/` and symlink them into the project.
