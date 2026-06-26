@@ -96,6 +96,48 @@ def test_rlsd_teacher_and_old_logprobs_are_stop_gradient():
     assert advantages.grad is not None
 
 
+def test_rlsd_large_log_weights_are_clipped_before_metrics():
+    advantages = torch.tensor([[1.0, -2.0]])
+    teacher = torch.tensor([[1000.0, -1000.0]])
+    old = torch.zeros_like(teacher)
+    mask = torch.ones_like(teacher)
+
+    out, metrics = compute_rlsd_advantages(
+        teacher_log_probs=teacher,
+        student_old_log_probs=old,
+        advantages=advantages,
+        response_mask=mask,
+        config=RLSDConfig(lam=0.5, clip_range=0.2),
+    )
+
+    assert torch.isfinite(out).all()
+    assert abs(metrics["rlsd/weight_mean"] - 1.2) < 1e-6
+    assert metrics["rlsd/weight_std"] == 0.0
+    assert metrics["rlsd/clip_high_ratio"] == 1.0
+    assert torch.isfinite(torch.tensor(metrics["rlsd/log_weight_mean"]))
+    assert torch.isfinite(torch.tensor(metrics["rlsd/log_weight_std"]))
+
+
+def test_rlsd_rejects_non_finite_valid_inputs():
+    advantages = torch.tensor([[1.0, 1.0]])
+    teacher = torch.tensor([[float("nan"), 0.0]])
+    old = torch.zeros_like(teacher)
+    mask = torch.ones_like(teacher)
+
+    try:
+        compute_rlsd_advantages(
+            teacher_log_probs=teacher,
+            student_old_log_probs=old,
+            advantages=advantages,
+            response_mask=mask,
+            config=RLSDConfig(lam=0.5, clip_range=0.2),
+        )
+    except ValueError as exc:
+        assert "non-finite teacher_log_probs" in str(exc)
+        return
+    raise AssertionError("Expected non-finite valid teacher logprobs to fail")
+
+
 def test_opd_pg_advantages_are_clipped_and_detached():
     teacher = torch.tensor([[10.0, -10.0]], requires_grad=True)
     old = torch.zeros_like(teacher, requires_grad=True)

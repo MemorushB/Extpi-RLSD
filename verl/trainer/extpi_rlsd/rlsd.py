@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 from typing import Any
 
@@ -30,7 +31,13 @@ def _as_mask(response_mask: torch.Tensor, like: torch.Tensor) -> torch.Tensor:
 def _masked_mean(value: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
     mask = mask.to(dtype=value.dtype, device=value.device)
     denom = mask.sum().clamp_min(1.0)
-    return (value * mask).sum() / denom
+    masked_value = torch.where(mask.bool(), value, torch.zeros_like(value))
+    return masked_value.sum() / denom
+
+
+def _masked_std(value: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
+    mean = _masked_mean(value, mask)
+    return torch.sqrt(_masked_mean((value - mean) ** 2, mask).clamp_min(0.0))
 
 
 def compute_rlsd_advantages(
@@ -60,10 +67,25 @@ def compute_rlsd_advantages(
         )
 
     mask = _as_mask(response_mask, advantages)
-    delta = (teacher_log_probs.detach() - student_old_log_probs.detach()) * mask
+    delta = teacher_log_probs.detach() - student_old_log_probs.detach()
     sign_adv = torch.sign(advantages.detach())
-    raw_weights = torch.exp(sign_adv * delta) * mask
-    clipped_weights = torch.clamp(raw_weights, min=1.0 - config.clip_range, max=1.0 + config.clip_range)
+    signed_delta = (sign_adv * delta).detach()
+    valid = mask.bool()
+    if valid.any():
+        for name, tensor in {
+            "teacher_log_probs": teacher_log_probs.detach(),
+            "student_old_log_probs": student_old_log_probs.detach(),
+            "advantages": advantages.detach(),
+            "signed_delta": signed_delta,
+        }.items():
+            if not torch.isfinite(tensor[valid]).all():
+                bad = (~torch.isfinite(tensor[valid])).sum().item()
+                raise ValueError(f"RLSD found non-finite {name} on {bad} valid tokens")
+
+    log_low = math.log(1.0 - config.clip_range)
+    log_high = math.log(1.0 + config.clip_range)
+    clipped_log_weight = signed_delta.clamp(min=log_low, max=log_high)
+    clipped_weights = torch.exp(clipped_log_weight) * mask
     reweight = ((1.0 - config.lam) + config.lam * clipped_weights) * mask
 
     if config.negative_only:
@@ -75,17 +97,17 @@ def compute_rlsd_advantages(
     valid_nonzero = (mask > 0) & (advantages != 0)
     sign_flips = ((torch.sign(reweighted_advantages) != torch.sign(advantages)) & valid_nonzero).sum()
 
-    low = 1.0 - config.clip_range
-    high = 1.0 + config.clip_range
     metrics = {
         "rlsd/delta_mean": _masked_mean(delta, mask).detach().item(),
-        "rlsd/delta_std": torch.sqrt(_masked_mean((delta - _masked_mean(delta, mask)) ** 2, mask)).detach().item(),
-        "rlsd/weight_mean": _masked_mean(raw_weights, mask).detach().item(),
-        "rlsd/weight_std": torch.sqrt(
-            _masked_mean((raw_weights - _masked_mean(raw_weights, mask)) ** 2, mask)
+        "rlsd/delta_std": _masked_std(delta, mask).detach().item(),
+        "rlsd/log_weight_mean": _masked_mean(signed_delta, mask).detach().item(),
+        "rlsd/log_weight_std": _masked_std(signed_delta, mask).detach().item(),
+        "rlsd/weight_mean": _masked_mean(clipped_weights, mask).detach().item(),
+        "rlsd/weight_std": _masked_std(clipped_weights, mask).detach().item(),
+        "rlsd/clip_low_ratio": _masked_mean((signed_delta < log_low).to(dtype=advantages.dtype), mask).detach().item(),
+        "rlsd/clip_high_ratio": _masked_mean(
+            (signed_delta > log_high).to(dtype=advantages.dtype), mask
         ).detach().item(),
-        "rlsd/clip_low_ratio": _masked_mean((raw_weights < low).to(dtype=advantages.dtype), mask).detach().item(),
-        "rlsd/clip_high_ratio": _masked_mean((raw_weights > high).to(dtype=advantages.dtype), mask).detach().item(),
         "rlsd/effective_lambda": config.lam,
         "rlsd/adv_abs_mean_before": _masked_mean(advantages.detach().abs(), mask).detach().item(),
         "rlsd/adv_abs_mean_after": _masked_mean(reweighted_advantages.detach().abs(), mask).detach().item(),

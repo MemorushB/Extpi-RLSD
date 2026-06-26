@@ -74,6 +74,12 @@ def get_ppo_ray_runtime_env():
         if os.environ.get(key) is not None:
             runtime_env["env_vars"].pop(key, None)
     # Always forward these at call-time, not import-time.
-    for key in ("PYTHONHASHSEED", "VERL_FULL_DETERMINISM", "VLLM_BATCH_INVARIANT"):
-        runtime_env["env_vars"][key] = os.environ.get(key, "0")
+    for key, default in (
+        ("PYTHONHASHSEED", "0"),
+        ("VERL_FULL_DETERMINISM", "0"),
+        ("VLLM_BATCH_INVARIANT", "0"),
+        ("RAY_EXPERIMENTAL_NOSET_CUDA_VISIBLE_DEVICES", "0"),
+    ):
+        value = os.environ.get(key, default)
+        runtime_env["env_vars"][key] = str(value)
     return runtime_env
