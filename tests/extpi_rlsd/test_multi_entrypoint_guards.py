@@ -45,13 +45,13 @@ def test_actor_yaml_has_extpi_policy_loss_keys():
 
 
 def test_online_scripts_set_rollout_logprob_microbatch():
-    for script_name in ("run_grpo.sh", "run_extpi_rlsd.sh"):
+    for script_name in ("run_grpo.sh", "run_extpi_rlsd.sh", "run_grpo_multi.sh", "run_extpi_rlsd_multi.sh"):
         text = _read_script(script_name)
         assert "actor_rollout_ref.rollout.log_prob_micro_batch_size_per_gpu" in text
 
 
 def test_online_scripts_set_current_and_legacy_reward_paths():
-    for script_name in ("run_grpo.sh", "run_extpi_rlsd.sh"):
+    for script_name in ("run_grpo.sh", "run_extpi_rlsd.sh", "run_grpo_multi.sh", "run_extpi_rlsd_multi.sh"):
         text = _read_script(script_name)
         assert "custom_reward_function.path=recipes/extpi_rlsd/rewards/math_verify_reward.py" in text
         assert "custom_reward_function.name=compute_score" in text
@@ -194,6 +194,44 @@ def test_env_single_card_allows_forced_cuda_allocator(tmp_path):
         }
     )
     cmd = f"source {SCRIPT_DIR / '_env.sh'}; printf \"%s\" \"$PYTORCH_CUDA_ALLOC_CONF\""
+    result = subprocess.run(["bash", "-lc", cmd], env=env, capture_output=True, text=True, check=False)
+
+    assert result.returncode == 0
+    assert result.stdout == "max_split_size_mb:128"
+
+
+def test_env_multi_unsets_cuda_allocator_by_default(tmp_path):
+    env = os.environ.copy()
+    env.update(
+        {
+            "CUDA_VISIBLE_DEVICES": "0,1",
+            "NPROC_PER_NODE": "2",
+            "NGPUS_PER_NODE": "2",
+            "EXTPI_ENABLE_WANDB": "0",
+            "EXTPI_DATA_ROOT": str(tmp_path),
+            "PYTORCH_CUDA_ALLOC_CONF": "expandable_segments:True",
+        }
+    )
+    cmd = f"source {SCRIPT_DIR / '_env_multi.sh'}; printf \"%s\" \"${{PYTORCH_CUDA_ALLOC_CONF-unset}}\""
+    result = subprocess.run(["bash", "-lc", cmd], env=env, capture_output=True, text=True, check=False)
+
+    assert result.returncode == 0
+    assert result.stdout == "unset"
+
+
+def test_env_multi_allows_forced_cuda_allocator(tmp_path):
+    env = os.environ.copy()
+    env.update(
+        {
+            "CUDA_VISIBLE_DEVICES": "0,1",
+            "NPROC_PER_NODE": "2",
+            "NGPUS_PER_NODE": "2",
+            "EXTPI_ENABLE_WANDB": "0",
+            "EXTPI_DATA_ROOT": str(tmp_path),
+            "EXTPI_FORCE_PYTORCH_CUDA_ALLOC_CONF": "max_split_size_mb:128",
+        }
+    )
+    cmd = f"source {SCRIPT_DIR / '_env_multi.sh'}; printf \"%s\" \"$PYTORCH_CUDA_ALLOC_CONF\""
     result = subprocess.run(["bash", "-lc", cmd], env=env, capture_output=True, text=True, check=False)
 
     assert result.returncode == 0
