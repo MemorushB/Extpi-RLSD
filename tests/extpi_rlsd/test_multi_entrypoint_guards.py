@@ -39,6 +39,18 @@ def test_multi_opd_entrypoint_uses_teacher_pool():
     assert "RAY_EXPERIMENTAL_NOSET_CUDA_VISIBLE_DEVICES=1" not in text
 
 
+def test_env_multi_has_no_gpu6_guard_and_unsets_single_card_ray_override():
+    text = _read_script("_env_multi.sh")
+    assert 'CUDA_VISIBLE_DEVICES}" != "6"' not in text
+    assert "unset RAY_EXPERIMENTAL_NOSET_CUDA_VISIBLE_DEVICES" in text
+
+
+def test_extpi_multi_keeps_base_no_adapter_guard():
+    text = _read_script("run_extpi_rlsd_multi.sh")
+    assert 'TEACHER_UPDATE_MODE="${TEACHER_UPDATE_MODE:-base_no_adapter}"' in text
+    assert 'Multi-GPU ExtPI MVP currently supports base_no_adapter only.' in text
+
+
 def test_env_multi_rejects_single_gpu():
     env = os.environ.copy()
     env.update({"CUDA_VISIBLE_DEVICES": "6", "NGPUS_PER_NODE": "1", "NPROC_PER_NODE": "1"})

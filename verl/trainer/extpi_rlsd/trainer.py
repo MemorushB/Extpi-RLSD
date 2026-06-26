@@ -15,7 +15,12 @@ from verl.trainer.extpi_rlsd.prompt_assembly import (
     assert_no_pi_in_student_prompt,
     build_pi_teacher_prompt,
 )
-from verl.trainer.extpi_rlsd.scorer import InlineHFTeacherScorer, TeacherScoreRequest, assert_tokenizer_compatible
+from verl.trainer.extpi_rlsd.scorer import (
+    InlineHFTeacherScorer,
+    TeacherScoreRequest,
+    assert_left_padded_prefix_mask,
+    assert_tokenizer_compatible,
+)
 from verl.utils.torch_functional import masked_mean
 
 try:
@@ -74,7 +79,6 @@ def _tokenize_prefixes(
     encoded = tokenizer(prompts, add_special_tokens=False, padding=False, truncation=False)
     input_ids_list = encoded["input_ids"]
     truncation_side = getattr(tokenizer, "truncation_side", "right")
-    padding_side = getattr(tokenizer, "padding_side", "right")
     normalized: list[list[int]] = []
     truncated = 0
     for input_ids in input_ids_list:
@@ -95,10 +99,7 @@ def _tokenize_prefixes(
         if not ids:
             raise ValueError("PI teacher prompt tokenized to an empty prefix")
         width = len(ids)
-        if padding_side == "left":
-            start = max_length - width
-        else:
-            start = 0
+        start = max_length - width
         input_ids[row_idx, start : start + width] = torch.tensor(ids, dtype=torch.long)
         attention_mask[row_idx, start : start + width] = 1
     return input_ids, attention_mask, truncated
@@ -208,7 +209,8 @@ def build_direct_opd_teacher_score_batch(
     for key in ("prompts", "responses", "attention_mask", "response_mask"):
         if key not in source_batch.batch:
             raise ValueError(f"source batch is missing required tensor key {key!r}")
-    del teacher_thinking
+    if teacher_thinking:
+        raise ValueError("direct_opd_teacher_thinking=True is incompatible with exact student prompt reuse")
 
     pad_token_id = getattr(tokenizer, "pad_token_id", None)
     if pad_token_id is None:
@@ -223,23 +225,14 @@ def build_direct_opd_teacher_score_batch(
             f"attention width {full_attention_mask.shape[1]} < prompt width {prefix_width}"
         )
     prefix_mask = full_attention_mask[:, :prefix_width]
-    if prefix_mask.sum(dim=-1).eq(0).any():
-        raise ValueError("Direct OPD-PG found an empty student prompt prefix")
+    assert_left_padded_prefix_mask(prefix_mask)
 
     truncated = 0
     if prefix_width > max_prompt_length:
-        if not allow_prompt_truncation:
-            raise ValueError(
-                f"Direct OPD-PG prompt width {prefix_width} exceeds teacher_max_prompt_length={max_prompt_length}"
-            )
-        truncated = prefix_ids.shape[0]
-        truncation_side = getattr(tokenizer, "truncation_side", "right")
-        if truncation_side == "left":
-            prefix_ids = prefix_ids[:, -max_prompt_length:]
-            prefix_mask = prefix_mask[:, -max_prompt_length:]
-        else:
-            prefix_ids = prefix_ids[:, :max_prompt_length]
-            prefix_mask = prefix_mask[:, :max_prompt_length]
+        raise ValueError(
+            "Direct OPD-PG requires the exact student prompt prefix and cannot truncate it: "
+            f"prompt width {prefix_width} exceeds teacher_max_prompt_length={max_prompt_length}"
+        )
 
     responses = source_batch.batch["responses"].detach().cpu().long()
     response_mask = source_batch.batch["response_mask"].detach().cpu().long()

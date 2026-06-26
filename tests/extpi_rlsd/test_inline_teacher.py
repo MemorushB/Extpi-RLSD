@@ -29,9 +29,9 @@ class FakeTokenizer:
 def _source_batch():
     return DataProto.from_dict(
         tensors={
-            "prompts": torch.tensor([[101, 102, 0, 0], [201, 202, 203, 0]]),
+            "prompts": torch.tensor([[0, 0, 101, 102], [0, 201, 202, 203]]),
             "responses": torch.tensor([[11, 12, 0], [21, 22, 23]]),
-            "attention_mask": torch.tensor([[1, 1, 0, 0, 1, 1, 0], [1, 1, 1, 0, 1, 1, 1]]),
+            "attention_mask": torch.tensor([[0, 0, 1, 1, 1, 1, 0], [0, 1, 1, 1, 1, 1, 1]]),
             "response_mask": torch.tensor([[1, 1, 0], [1, 1, 1]]),
             "old_log_probs": torch.zeros(2, 3),
         },
@@ -71,6 +71,24 @@ def test_pi_teacher_score_batch_preserves_original_response_ids():
     assert all("trace" in prompt for prompt in built.prompts)
 
 
+def test_pi_teacher_prefixes_are_left_padded_even_if_tokenizer_default_is_right():
+    class RightPadTokenizer(FakeTokenizer):
+        padding_side = "right"
+
+    built = build_pi_teacher_score_batch(
+        source_batch=_source_batch(),
+        tokenizer=RightPadTokenizer(),
+        max_prompt_length=128,
+    )
+
+    prefix_mask = built.batch.batch["attention_mask"][:, :128].bool()
+    assert prefix_mask[:, -1].all()
+    for row in prefix_mask:
+        first_real = int(row.nonzero()[0].item())
+        assert not row[:first_real].any()
+        assert row[first_real:].all()
+
+
 def test_direct_opd_teacher_score_batch_reuses_student_prompt_tokens():
     batch = _source_batch()
     batch.non_tensor_batch["extra_info"][0]["problem"] = "template drift should not be retokenized"
@@ -86,6 +104,55 @@ def test_direct_opd_teacher_score_batch_reuses_student_prompt_tokens():
     assert built.batch.batch["responses"].tolist() == batch.batch["responses"].tolist()
     prefix_width = built.batch.batch["prompts"].shape[1]
     assert torch.equal(built.batch.batch["input_ids"][:, prefix_width:], built.batch.batch["responses"])
+
+
+def test_direct_opd_rejects_right_padded_prefix():
+    batch = _source_batch()
+    batch.batch["prompts"] = torch.tensor([[101, 102, 0, 0], [201, 202, 203, 0]])
+    batch.batch["attention_mask"][:, :4] = torch.tensor([[1, 1, 0, 0], [1, 1, 1, 0]])
+
+    try:
+        build_direct_opd_teacher_score_batch(
+            source_batch=batch,
+            tokenizer=FakeTokenizer(),
+            max_prompt_length=256,
+        )
+    except ValueError as exc:
+        assert "left-padded" in str(exc)
+        return
+    raise AssertionError("Expected right-padded direct OPD prefix to fail")
+
+
+def test_direct_opd_rejects_truncated_prefix():
+    batch = _source_batch()
+
+    try:
+        build_direct_opd_teacher_score_batch(
+            source_batch=batch,
+            tokenizer=FakeTokenizer(),
+            max_prompt_length=3,
+            allow_prompt_truncation=True,
+        )
+    except ValueError as exc:
+        assert "cannot truncate" in str(exc)
+        return
+    raise AssertionError("Expected direct OPD prompt truncation to fail")
+
+
+def test_direct_opd_rejects_thinking_mode_with_exact_prompt_reuse():
+    batch = _source_batch()
+
+    try:
+        build_direct_opd_teacher_score_batch(
+            source_batch=batch,
+            tokenizer=FakeTokenizer(),
+            max_prompt_length=256,
+            teacher_thinking=True,
+        )
+    except ValueError as exc:
+        assert "direct_opd_teacher_thinking=True" in str(exc)
+        return
+    raise AssertionError("Expected direct OPD thinking mode to fail")
 
 
 def test_direct_opd_teacher_score_batch_requires_student_prompt_tokens():
@@ -172,7 +239,7 @@ def test_direct_opd_hook_injects_teacher_log_probs_from_inline_scorer():
     def fake_score_inline(build, extpi_config):
         assert extpi_config["direct_opd_teacher_model_path"] == "fake-teacher"
         prefix_width = build.batch.batch["prompts"].shape[1]
-        assert torch.equal(build.batch.batch["prompts"], torch.tensor([[101, 102, 0, 0], [201, 202, 203, 0]]))
+        assert torch.equal(build.batch.batch["prompts"], torch.tensor([[0, 0, 101, 102], [0, 201, 202, 203]]))
         assert torch.equal(build.batch.batch["input_ids"][:, prefix_width:], build.batch.batch["responses"])
         return build.batch.batch["responses"].float() / 10
 

@@ -38,6 +38,31 @@ class TeacherScorer(Protocol):
         """Score response tokens from a request."""
 
 
+def assert_left_padded_prefix_mask(prefix_attention_mask: torch.Tensor) -> None:
+    """Fail unless every prefix row is left-padded with a real token in the last column."""
+
+    if prefix_attention_mask.ndim != 2:
+        raise ValueError("prefix_attention_mask must be a rank-2 tensor")
+    mask = prefix_attention_mask.to(dtype=torch.bool)
+    token_counts = mask.long().sum(dim=-1)
+    if token_counts.eq(0).any():
+        raise ValueError("Teacher scorer found an empty prompt prefix")
+    if not mask[:, -1].all():
+        raise ValueError(
+            "Teacher scorer requires left-padded prompt prefixes with a real token at prefix_width-1. "
+            "Found right-padded or non-contiguous prompt prefix."
+        )
+
+    width = mask.shape[1]
+    col_idx = torch.arange(width, device=mask.device).view(1, -1)
+    expected = col_idx >= (width - token_counts).view(-1, 1)
+    if not torch.equal(mask, expected):
+        raise ValueError(
+            "Teacher scorer requires contiguous left-padded prompt prefixes. "
+            "Found right-padded or non-contiguous prompt prefix."
+        )
+
+
 def build_causal_score_inputs(
     *,
     prefix_input_ids: torch.LongTensor,
@@ -60,6 +85,7 @@ def build_causal_score_inputs(
         raise ValueError("response_ids and response_mask shapes differ")
     if prefix_input_ids.shape[0] != response_ids.shape[0]:
         raise ValueError("prefix and response batch sizes differ")
+    assert_left_padded_prefix_mask(prefix_attention_mask)
 
     response_mask_bool = response_mask.to(device=response_ids.device, dtype=torch.bool)
     response_ids_for_input = response_ids.masked_fill(~response_mask_bool, pad_token_id)

@@ -1,6 +1,7 @@
 import torch
 
 from verl.trainer.extpi_rlsd.scorer import (
+    assert_left_padded_prefix_mask,
     assert_tokenizer_compatible,
     build_causal_score_inputs,
     gather_response_log_probs,
@@ -59,6 +60,30 @@ def test_response_tokens_are_appended_without_retokenization_and_offsets_are_cor
 
     assert log_probs.shape == responses.shape
     assert torch.all(log_probs > -0.01)
+
+
+def test_causal_score_inputs_reject_right_padded_prefix():
+    try:
+        build_causal_score_inputs(
+            prefix_input_ids=torch.tensor([[11, 12, 0]]),
+            prefix_attention_mask=torch.tensor([[1, 1, 0]]),
+            response_ids=torch.tensor([[5]]),
+            response_mask=torch.tensor([[1]]),
+            pad_token_id=0,
+        )
+    except ValueError as exc:
+        assert "left-padded" in str(exc)
+        return
+    raise AssertionError("Expected right-padded prefix to fail")
+
+
+def test_prefix_mask_guard_rejects_non_contiguous_prefix():
+    try:
+        assert_left_padded_prefix_mask(torch.tensor([[0, 1, 0, 1]]))
+    except ValueError as exc:
+        assert "non-contiguous" in str(exc)
+        return
+    raise AssertionError("Expected non-contiguous prefix mask to fail")
 
 
 def test_temperature_changes_gathered_logprob_distribution():
