@@ -88,6 +88,22 @@ def test_direct_opd_teacher_score_batch_reuses_student_prompt_tokens():
     assert torch.equal(built.batch.batch["input_ids"][:, prefix_width:], built.batch.batch["responses"])
 
 
+def test_direct_opd_teacher_score_batch_requires_student_prompt_tokens():
+    batch = _source_batch()
+    del batch.batch["prompts"]
+
+    try:
+        build_direct_opd_teacher_score_batch(
+            source_batch=batch,
+            tokenizer=FakeTokenizer(),
+            max_prompt_length=256,
+        )
+    except ValueError as exc:
+        assert "prompts" in str(exc)
+        return
+    raise AssertionError("Expected missing student prompt tokens to fail")
+
+
 def test_extpi_hook_injects_teacher_pi_log_probs_from_ref_path():
     trainer = ExtPIRLSDRayPPOTrainer.__new__(ExtPIRLSDRayPPOTrainer)
     trainer.tokenizer = FakeTokenizer()
@@ -169,6 +185,8 @@ def test_direct_opd_hook_injects_teacher_log_probs_from_inline_scorer():
     assert metrics["opd/teacher_response_tokens"] == 5.0
     assert metrics["train/step_teacher_tokens"] == 5.0
     assert "opd/inline_teacher_score_time" in metrics
+    assert "opd/inline_teacher_memory_allocated_gb" in metrics
+    assert "opd/inline_teacher_memory_reserved_gb" in metrics
 
 
 def test_extpi_score_batch_requires_pi_trace():

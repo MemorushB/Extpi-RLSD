@@ -146,6 +146,23 @@ bash recipes/extpi_rlsd/scripts/evaluate_all.sh
 Matched-dev checkpoint selection defaults to Avg@4 with fixed prompt-seed pairs
 `0,1,2,3` and `max_new_tokens=4096`.
 
+## WandB Logging
+
+All training entrypoints use `TRAINER_LOGGER`, which defaults to
+`["console"]`. Enable WandB with:
+
+```bash
+EXTPI_ENABLE_WANDB=1 \
+WANDB_ENTITY=... \
+WANDB_MODE=online \
+TOTAL_TRAINING_STEPS=5 \
+bash recipes/extpi_rlsd/scripts/run_extpi_rlsd.sh
+```
+
+Set `TRAINER_LOGGER='["console","wandb"]'` directly if you need explicit verl
+logger control. `WANDB_DIR` defaults to
+`/data/users/rchen/extpi-rlsd/outputs/wandb`.
+
 ## Public Claims Boundary
 
 Use the label `OPD-PG (sampled-token K1)` for the direct distillation baseline.

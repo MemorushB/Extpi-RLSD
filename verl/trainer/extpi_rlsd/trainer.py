@@ -397,6 +397,12 @@ class ExtPIRLSDRayPPOTrainer(RayPPOTrainer):
         self._direct_opd_inline_teacher_max_memory_allocated_gb = (
             torch.cuda.max_memory_allocated() / (1024**3) if track_cuda else 0.0
         )
+        self._direct_opd_inline_teacher_memory_allocated_gb = (
+            torch.cuda.memory_allocated() / (1024**3) if track_cuda else 0.0
+        )
+        self._direct_opd_inline_teacher_memory_reserved_gb = (
+            torch.cuda.memory_reserved() / (1024**3) if track_cuda else 0.0
+        )
         return torch.cat(outputs, dim=0)
 
     def _before_actor_update(
@@ -461,6 +467,12 @@ class ExtPIRLSDRayPPOTrainer(RayPPOTrainer):
             )
             metrics["opd/inline_teacher_max_memory_allocated_gb"] = float(
                 getattr(self, "_direct_opd_inline_teacher_max_memory_allocated_gb", 0.0)
+            )
+            metrics["opd/inline_teacher_memory_allocated_gb"] = float(
+                getattr(self, "_direct_opd_inline_teacher_memory_allocated_gb", 0.0)
+            )
+            metrics["opd/inline_teacher_memory_reserved_gb"] = float(
+                getattr(self, "_direct_opd_inline_teacher_memory_reserved_gb", 0.0)
             )
             return batch
 

@@ -95,5 +95,5 @@ python3 -m verl.trainer.extpi_rlsd.main_extpi_rlsd \
   trainer.save_freq="${SAVE_FREQ:-5}" \
   trainer.test_freq="${TEST_FREQ:-5}" \
   trainer.default_local_dir="${EXTPI_DATA_ROOT}/checkpoints/${EXPERIMENT_NAME}" \
-  trainer.logger='["console"]' \
+  trainer.logger="${TRAINER_LOGGER}" \
   "$@"

@@ -24,6 +24,21 @@ export EXTPI_DATA_ROOT="${EXTPI_DATA_ROOT:-/data/users/rchen/extpi-rlsd}"
 export EXTPI_REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 export PYTHONPATH="${EXTPI_REPO_ROOT}${PYTHONPATH:+:${PYTHONPATH}}"
 
+if [ -z "${TRAINER_LOGGER:-}" ]; then
+  case "${EXTPI_ENABLE_WANDB:-0}" in
+    1|true|TRUE|yes|YES)
+      export TRAINER_LOGGER='["console","wandb"]'
+      ;;
+    *)
+      export TRAINER_LOGGER='["console"]'
+      ;;
+  esac
+fi
+if [[ "${TRAINER_LOGGER}" == *wandb* ]]; then
+  export WANDB_DIR="${WANDB_DIR:-${EXTPI_DATA_ROOT}/outputs/wandb}"
+  mkdir -p "${WANDB_DIR}"
+fi
+
 write_extpi_run_manifest() {
   local experiment_name="$1"
   shift
@@ -35,6 +50,7 @@ write_extpi_run_manifest() {
     --config_kv "cuda_visible_devices=${CUDA_VISIBLE_DEVICES}"
     --config_kv "nproc_per_node=${NPROC_PER_NODE}"
     --config_kv "ngpus_per_node=${NGPUS_PER_NODE}"
+    --config_kv "trainer_logger=${TRAINER_LOGGER}"
   )
   if [ -n "${SPLIT_MANIFEST:-}" ]; then
     manifest_args+=(--dataset_manifest "${SPLIT_MANIFEST}")

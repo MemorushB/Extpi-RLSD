@@ -31,6 +31,21 @@ export PYTHONPATH="${EXTPI_REPO_ROOT}${PYTHONPATH:+:${PYTHONPATH}}"
 # Multi-GPU resource pools should use Ray's normal CUDA isolation.
 unset RAY_EXPERIMENTAL_NOSET_CUDA_VISIBLE_DEVICES
 
+if [ -z "${TRAINER_LOGGER:-}" ]; then
+  case "${EXTPI_ENABLE_WANDB:-0}" in
+    1|true|TRUE|yes|YES)
+      export TRAINER_LOGGER='["console","wandb"]'
+      ;;
+    *)
+      export TRAINER_LOGGER='["console"]'
+      ;;
+  esac
+fi
+if [[ "${TRAINER_LOGGER}" == *wandb* ]]; then
+  export WANDB_DIR="${WANDB_DIR:-${EXTPI_DATA_ROOT}/outputs/wandb}"
+  mkdir -p "${WANDB_DIR}"
+fi
+
 write_extpi_run_manifest() {
   local experiment_name="$1"
   shift
@@ -44,6 +59,7 @@ write_extpi_run_manifest() {
     --config_kv "nproc_per_node=${NPROC_PER_NODE}"
     --config_kv "ngpus_per_node=${NGPUS_PER_NODE}"
     --config_kv "multi_gpu=true"
+    --config_kv "trainer_logger=${TRAINER_LOGGER}"
   )
   if [ -n "${SPLIT_MANIFEST:-}" ]; then
     manifest_args+=(--dataset_manifest "${SPLIT_MANIFEST}")

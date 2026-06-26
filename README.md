@@ -166,6 +166,35 @@ The matched-dev evaluator defaults to Avg@4 with fixed prompt-seed pairs
 `0,1,2,3` and `max_new_tokens=4096`. Override with `EVAL_SEEDS` only when a run
 manifest records the change.
 
+## WandB Logging
+
+Training scripts default to console-only logging:
+
+```bash
+TRAINER_LOGGER='["console"]'
+```
+
+Enable WandB for any single-card or multi-GPU training entrypoint with:
+
+```bash
+EXTPI_ENABLE_WANDB=1 \
+WANDB_ENTITY=... \
+WANDB_MODE=online \
+TOTAL_TRAINING_STEPS=5 \
+bash recipes/extpi_rlsd/scripts/run_extpi_rlsd.sh
+```
+
+You can also pass the verl logger list directly:
+
+```bash
+TRAINER_LOGGER='["console","wandb"]' bash recipes/extpi_rlsd/scripts/run_grpo.sh
+```
+
+Local WandB files are written under
+`/data/users/rchen/extpi-rlsd/outputs/wandb` by default through `WANDB_DIR`, so
+they stay outside the Git checkout. Credentials such as `WANDB_API_KEY` must be
+provided through the environment and are never written to the run manifest.
+
 ## Tests
 
 Run local contract tests without starting training:

@@ -5,6 +5,7 @@ source "${SCRIPT_DIR}/_env.sh"
 
 TRAIN_FILE="${TRAIN_FILE:-${EXTPI_DATA_ROOT}/datasets/closed_sft/train.parquet}"
 MODEL_PATH="${MODEL_PATH:-Qwen/Qwen3-1.7B}"
+PROJECT_NAME="${PROJECT_NAME:-extpi_rlsd}"
 EXPERIMENT_NAME="${EXPERIMENT_NAME:-closed_sft_qwen3_1p7b_lora}"
 SPLIT_MANIFEST="${SPLIT_MANIFEST:-${EXTPI_DATA_ROOT}/datasets/closed_sft/manifest.json}"
 
@@ -30,7 +31,8 @@ python3 -m verl.trainer.sft_trainer \
   model.lora_alpha=64 \
   trainer.default_local_dir="${EXTPI_DATA_ROOT}/checkpoints/${EXPERIMENT_NAME}" \
   trainer.total_epochs="${SFT_EPOCHS:-4}" \
-  trainer.project_name=extpi_rlsd \
+  trainer.project_name="${PROJECT_NAME}" \
   trainer.experiment_name="${EXPERIMENT_NAME}" \
   trainer.n_gpus_per_node=1 \
+  trainer.logger="${TRAINER_LOGGER}" \
   "$@"
