@@ -116,7 +116,18 @@ def main() -> None:
     quarantine = []
     stats = Counter()
     for source in rows:
-        normalized = normalize_row(dict(source), args.revision, args.split)
+        try:
+            normalized = normalize_row(dict(source), args.revision, args.split)
+        except ValueError as exc:
+            stats["invalid"] += 1
+            message = str(exc)
+            if "answer field" in message:
+                stats["invalid_missing_answer"] += 1
+            elif "problem field" in message:
+                stats["invalid_missing_problem"] += 1
+            else:
+                stats["invalid_other"] += 1
+            continue
         if normalized["id"] in seen:
             stats["duplicate"] += 1
             continue

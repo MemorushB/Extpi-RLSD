@@ -22,6 +22,7 @@ export MKL_NUM_THREADS="${MKL_NUM_THREADS:-1}"
 export PYTORCH_CUDA_ALLOC_CONF="${PYTORCH_CUDA_ALLOC_CONF:-expandable_segments:True}"
 export EXTPI_DATA_ROOT="${EXTPI_DATA_ROOT:-/data/users/rchen/extpi-rlsd}"
 export EXTPI_REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
+export PYTHONPATH="${EXTPI_REPO_ROOT}${PYTHONPATH:+:${PYTHONPATH}}"
 
 write_extpi_run_manifest() {
   local experiment_name="$1"
