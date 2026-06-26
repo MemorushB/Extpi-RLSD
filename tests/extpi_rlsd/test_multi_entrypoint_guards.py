@@ -31,6 +31,39 @@ def test_recipe_entrypoints_use_configurable_trainer_logger():
         assert "trainer.logger='[\"console\"]'" not in text
 
 
+def test_actor_yaml_has_extpi_policy_loss_keys():
+    text = (ROOT / "verl" / "trainer" / "config" / "actor" / "actor.yaml").read_text()
+    for key in (
+        "rlsd_enabled",
+        "rlsd_lambda",
+        "rlsd_reweight_clip_range",
+        "rlsd_negative_only",
+        "opd_pg_enabled",
+        "opd_logratio_clip_abs",
+    ):
+        assert key in text
+
+
+def test_online_scripts_set_rollout_logprob_microbatch():
+    for script_name in ("run_grpo.sh", "run_extpi_rlsd.sh"):
+        text = _read_script(script_name)
+        assert "actor_rollout_ref.rollout.log_prob_micro_batch_size_per_gpu" in text
+
+
+def test_online_scripts_set_current_and_legacy_reward_paths():
+    for script_name in ("run_grpo.sh", "run_extpi_rlsd.sh"):
+        text = _read_script(script_name)
+        assert "custom_reward_function.path=recipes/extpi_rlsd/rewards/math_verify_reward.py" in text
+        assert "custom_reward_function.name=compute_score" in text
+        assert "reward.custom_reward_function.path=recipes/extpi_rlsd/rewards/math_verify_reward.py" in text
+        assert "reward.custom_reward_function.name=compute_score" in text
+
+
+def test_compute_ref_log_prob_assigns_temperature():
+    text = (ROOT / "verl" / "trainer" / "ppo" / "ray_trainer.py").read_text()
+    assert '"temperature": rollout_config.temperature' in text
+
+
 def test_multi_opd_entrypoint_uses_teacher_pool():
     text = _read_script("run_opd_pg_multi_teacher_pool.sh")
     assert "distillation.enabled=True" in text
@@ -127,3 +160,41 @@ def test_env_single_card_can_disable_default_wandb(tmp_path):
     assert result.returncode == 0
     assert result.stdout == '["console"]'
     assert not (tmp_path / "outputs" / "wandb").exists()
+
+
+def test_env_single_card_unsets_cuda_allocator_by_default(tmp_path):
+    env = os.environ.copy()
+    env.update(
+        {
+            "CUDA_VISIBLE_DEVICES": "6",
+            "NPROC_PER_NODE": "1",
+            "NGPUS_PER_NODE": "1",
+            "EXTPI_ENABLE_WANDB": "0",
+            "EXTPI_DATA_ROOT": str(tmp_path),
+            "PYTORCH_CUDA_ALLOC_CONF": "expandable_segments:True",
+        }
+    )
+    cmd = f"source {SCRIPT_DIR / '_env.sh'}; printf \"%s\" \"${{PYTORCH_CUDA_ALLOC_CONF-unset}}\""
+    result = subprocess.run(["bash", "-lc", cmd], env=env, capture_output=True, text=True, check=False)
+
+    assert result.returncode == 0
+    assert result.stdout == "unset"
+
+
+def test_env_single_card_allows_forced_cuda_allocator(tmp_path):
+    env = os.environ.copy()
+    env.update(
+        {
+            "CUDA_VISIBLE_DEVICES": "6",
+            "NPROC_PER_NODE": "1",
+            "NGPUS_PER_NODE": "1",
+            "EXTPI_ENABLE_WANDB": "0",
+            "EXTPI_DATA_ROOT": str(tmp_path),
+            "EXTPI_FORCE_PYTORCH_CUDA_ALLOC_CONF": "max_split_size_mb:128",
+        }
+    )
+    cmd = f"source {SCRIPT_DIR / '_env.sh'}; printf \"%s\" \"$PYTORCH_CUDA_ALLOC_CONF\""
+    result = subprocess.run(["bash", "-lc", cmd], env=env, capture_output=True, text=True, check=False)
+
+    assert result.returncode == 0
+    assert result.stdout == "max_split_size_mb:128"

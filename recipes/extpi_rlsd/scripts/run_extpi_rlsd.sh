@@ -40,6 +40,8 @@ python3 -m verl.trainer.extpi_rlsd.main_extpi_rlsd \
   data.shuffle=False \
   custom_reward_function.path=recipes/extpi_rlsd/rewards/math_verify_reward.py \
   custom_reward_function.name=compute_score \
+  reward.custom_reward_function.path=recipes/extpi_rlsd/rewards/math_verify_reward.py \
+  reward.custom_reward_function.name=compute_score \
   actor_rollout_ref.model.path="${MODEL_PATH}" \
   actor_rollout_ref.model.enable_gradient_checkpointing=True \
   actor_rollout_ref.model.lora_rank=32 \
@@ -63,6 +65,7 @@ python3 -m verl.trainer.extpi_rlsd.main_extpi_rlsd \
   actor_rollout_ref.rollout.gpu_memory_utilization="${ROLLOUT_GPU_MEM_UTIL:-0.5}" \
   actor_rollout_ref.rollout.max_num_batched_tokens="${MAX_NUM_BATCHED_TOKENS:-8192}" \
   actor_rollout_ref.rollout.free_cache_engine=True \
+  actor_rollout_ref.rollout.log_prob_micro_batch_size_per_gpu="${ROLLOUT_LOG_PROB_MICRO_BATCH_SIZE_PER_GPU:-1}" \
   +extpi_rlsd.teacher_update_mode=base_no_adapter \
   +extpi_rlsd.teacher_max_prompt_length="${TEACHER_MAX_PROMPT_LENGTH}" \
   +extpi_rlsd.allow_teacher_prompt_truncation="${ALLOW_TEACHER_PROMPT_TRUNCATION:-True}" \

@@ -1232,7 +1232,12 @@ class RayPPOTrainer:
         # step 2: convert from padding to nopadding
         batch_td = left_right_2_no_padding(batch_td)
         # step 3: add meta info
-        metadata = {"calculate_entropy": False, "compute_loss": False}
+        rollout_config = self.config.actor_rollout_ref.rollout
+        metadata = {
+            "calculate_entropy": False,
+            "compute_loss": False,
+            "temperature": rollout_config.temperature,
+        }
         if self.ref_in_actor:
             metadata["no_lora_adapter"] = True
         tu.assign_non_tensor(batch_td, **metadata)
