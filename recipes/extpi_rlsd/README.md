@@ -28,7 +28,7 @@ This creates `/data/users/rchen/extpi-rlsd/` and symlinks `data/`,
 
 ## GPU Constraint
 
-Recipe scripts default to:
+Single-card recipe scripts default to:
 
 ```bash
 CUDA_VISIBLE_DEVICES=6
@@ -38,6 +38,10 @@ NGPUS_PER_NODE=1
 
 They exit if another GPU is selected unless the scripts are intentionally
 changed.
+
+Multi-GPU entrypoints are separate `*_multi.sh` scripts. They source
+`_env_multi.sh`, require `NGPUS_PER_NODE>=2`, and expect `CUDA_VISIBLE_DEVICES`
+to be set intentionally.
 
 ## Data Flow
 
@@ -91,6 +95,36 @@ TOTAL_TRAINING_STEPS=5 bash recipes/extpi_rlsd/scripts/run_extpi_rlsd.sh
 
 The dedicated entry point is `verl.trainer.extpi_rlsd.main_extpi_rlsd`; it uses
 the legacy PPO trainer because the MVP hook is implemented there.
+
+## Multi-GPU Commands
+
+GRPO and ExtPI-RLSD scale actor/rollout workers across the visible GPUs:
+
+```bash
+CUDA_VISIBLE_DEVICES=0,1,2,3 \
+NGPUS_PER_NODE=4 \
+SCALE_MODE=fixed \
+TOTAL_TRAINING_STEPS=5 \
+bash recipes/extpi_rlsd/scripts/run_extpi_rlsd_multi.sh
+```
+
+Direct OPD uses different backends by entrypoint:
+
+- `run_opd_pg.sh`: single-card inline Qwen3-8B scorer.
+- `run_opd_pg_multi_teacher_pool.sh`: multi-GPU verl distillation teacher pool.
+
+Example 4-GPU OPD layout:
+
+```bash
+CUDA_VISIBLE_DEVICES=0,1,2,3 \
+NGPUS_PER_NODE=3 \
+TEACHER_NGPUS_PER_NODE=1 \
+TOTAL_TRAINING_STEPS=5 \
+bash recipes/extpi_rlsd/scripts/run_opd_pg_multi_teacher_pool.sh
+```
+
+Keep `SCALE_MODE=fixed` for single-card comparability. Use `SCALE_MODE=linear`
+only for throughput experiments after fixed-scale smoke passes.
 
 Run the local contract tests without starting training:
 

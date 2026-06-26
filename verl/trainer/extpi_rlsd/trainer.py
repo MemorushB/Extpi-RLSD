@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import time
+from collections import defaultdict
 from dataclasses import dataclass
 from typing import Any
 
@@ -11,7 +13,6 @@ from omegaconf import OmegaConf
 from verl import DataProto
 from verl.trainer.extpi_rlsd.prompt_assembly import (
     assert_no_pi_in_student_prompt,
-    build_direct_opd_teacher_prompt,
     build_pi_teacher_prompt,
 )
 from verl.trainer.extpi_rlsd.scorer import InlineHFTeacherScorer, TeacherScoreRequest, assert_tokenizer_compatible
@@ -123,6 +124,8 @@ def build_pi_teacher_score_batch(
     raw_prompts = source_batch.non_tensor_batch.get("raw_prompt")
     prompts: list[str] = []
     missing_trace_ids: list[str] = []
+    leak_checked_count = 0
+    leak_count = 0
     for row_idx, extra in enumerate(extra_infos):
         problem = extra.get("problem")
         trace = extra.get("qwen8b_pi_trace")
@@ -133,7 +136,12 @@ def build_pi_teacher_score_batch(
             missing_trace_ids.append(sample_id)
             continue
         if raw_prompts is not None:
-            assert_no_pi_in_student_prompt(_raw_prompt_to_text(raw_prompts[row_idx]) or "", str(trace))
+            leak_checked_count += 1
+            try:
+                assert_no_pi_in_student_prompt(_raw_prompt_to_text(raw_prompts[row_idx]) or "", str(trace))
+            except ValueError:
+                leak_count += 1
+                raise
         prompts.append(
             build_pi_teacher_prompt(
                 tokenizer,
@@ -181,6 +189,8 @@ def build_pi_teacher_score_batch(
         "extpi/pi_teacher_prompt_truncated_count": float(truncated),
         "extpi/pi_teacher_prompt_tokens_mean": float(prefix_mask.sum(dim=-1).float().mean().item()),
         "extpi/pi_teacher_response_tokens": float(response_mask.sum().item()),
+        "privacy/student_prompt_pi_leak_checked_count": float(leak_checked_count),
+        "privacy/student_prompt_pi_leak_count": float(leak_count),
     }
     return PiTeacherBatchBuild(batch=score_batch, metrics=metrics, prompts=prompts)
 
@@ -195,31 +205,41 @@ def build_direct_opd_teacher_score_batch(
 ) -> PiTeacherBatchBuild:
     """Build a temporary batch that scores original responses under direct teacher prompts."""
 
-    for key in ("responses", "response_mask"):
+    for key in ("prompts", "responses", "attention_mask", "response_mask"):
         if key not in source_batch.batch:
             raise ValueError(f"source batch is missing required tensor key {key!r}")
-    if "extra_info" not in source_batch.non_tensor_batch:
-        raise ValueError("Direct OPD-PG requires extra_info with problem")
-
-    extra_infos = [_as_dict(item) for item in source_batch.non_tensor_batch["extra_info"]]
-    prompts: list[str] = []
-    for row_idx, extra in enumerate(extra_infos):
-        problem = extra.get("problem")
-        sample_id = str(extra.get("id", row_idx))
-        if not problem:
-            raise ValueError(f"Direct OPD-PG sample {sample_id} is missing extra_info.problem")
-        prompts.append(build_direct_opd_teacher_prompt(tokenizer, str(problem), enable_thinking=teacher_thinking))
+    del teacher_thinking
 
     pad_token_id = getattr(tokenizer, "pad_token_id", None)
     if pad_token_id is None:
         pad_token_id = getattr(tokenizer, "eos_token_id", 0) or 0
-    prefix_ids, prefix_mask, truncated = _tokenize_prefixes(
-        tokenizer,
-        prompts,
-        max_length=max_prompt_length,
-        pad_token_id=int(pad_token_id),
-        allow_truncation=allow_prompt_truncation,
-    )
+
+    prefix_ids = source_batch.batch["prompts"].detach().cpu().long()
+    prefix_width = prefix_ids.shape[1]
+    full_attention_mask = source_batch.batch["attention_mask"].detach().cpu().long()
+    if full_attention_mask.shape[1] < prefix_width:
+        raise ValueError(
+            "Direct OPD-PG requires attention_mask to include the prompt segment: "
+            f"attention width {full_attention_mask.shape[1]} < prompt width {prefix_width}"
+        )
+    prefix_mask = full_attention_mask[:, :prefix_width]
+    if prefix_mask.sum(dim=-1).eq(0).any():
+        raise ValueError("Direct OPD-PG found an empty student prompt prefix")
+
+    truncated = 0
+    if prefix_width > max_prompt_length:
+        if not allow_prompt_truncation:
+            raise ValueError(
+                f"Direct OPD-PG prompt width {prefix_width} exceeds teacher_max_prompt_length={max_prompt_length}"
+            )
+        truncated = prefix_ids.shape[0]
+        truncation_side = getattr(tokenizer, "truncation_side", "right")
+        if truncation_side == "left":
+            prefix_ids = prefix_ids[:, -max_prompt_length:]
+            prefix_mask = prefix_mask[:, -max_prompt_length:]
+        else:
+            prefix_ids = prefix_ids[:, :max_prompt_length]
+            prefix_mask = prefix_mask[:, :max_prompt_length]
 
     responses = source_batch.batch["responses"].detach().cpu().long()
     response_mask = source_batch.batch["response_mask"].detach().cpu().long()
@@ -244,7 +264,46 @@ def build_direct_opd_teacher_score_batch(
         "opd/teacher_prompt_tokens_mean": float(prefix_mask.sum(dim=-1).float().mean().item()),
         "opd/teacher_response_tokens": float(response_mask.sum().item()),
     }
-    return PiTeacherBatchBuild(batch=score_batch, metrics=metrics, prompts=prompts)
+    return PiTeacherBatchBuild(batch=score_batch, metrics=metrics, prompts=[])
+
+
+def _group_diagnostic_metrics(
+    scores: torch.Tensor,
+    *,
+    uids: Any | None,
+    rollout_n: int,
+) -> tuple[dict[str, float], bool, bool]:
+    if uids is not None:
+        if len(uids) != scores.shape[0]:
+            return {"train/group_metric_uid_mismatch": 1.0}, True, False
+        uid_to_scores: dict[str, list[float]] = defaultdict(list)
+        for uid, score in zip(uids, scores.detach().cpu().tolist(), strict=True):
+            uid_to_scores[str(uid)].append(float(score))
+        groups = [torch.tensor(values, dtype=torch.float32) for values in uid_to_scores.values() if len(values) >= 2]
+        if not groups:
+            return {}, True, True
+        group_std = torch.tensor([group.std(unbiased=False).item() for group in groups], dtype=torch.float32)
+        all_correct = torch.tensor([(group >= 1.0).all().item() for group in groups], dtype=torch.float32)
+        all_wrong = torch.tensor([(group < 1.0).all().item() for group in groups], dtype=torch.float32)
+        return {
+            "train/group_nonzero_std_ratio": float((group_std > 0).float().mean().item()),
+            "train/group_all_correct_ratio": float(all_correct.mean().item()),
+            "train/group_all_wrong_ratio": float(all_wrong.mean().item()),
+        }, True, True
+
+    if rollout_n <= 0:
+        return {}, False, False
+    usable = (scores.shape[0] // rollout_n) * rollout_n
+    if usable == 0:
+        return {}, False, False
+    grouped = scores[:usable].view(-1, rollout_n)
+    group_std = grouped.std(dim=-1, unbiased=False)
+    correct = grouped >= 1.0
+    return {
+        "train/group_nonzero_std_ratio": float((group_std > 0).float().mean().detach().item()),
+        "train/group_all_correct_ratio": float(correct.all(dim=-1).float().mean().detach().item()),
+        "train/group_all_wrong_ratio": float((~correct).all(dim=-1).float().mean().detach().item()),
+    }, False, True
 
 
 class ExtPIRLSDRayPPOTrainer(RayPPOTrainer):
@@ -267,18 +326,12 @@ class ExtPIRLSDRayPPOTrainer(RayPPOTrainer):
         if "token_level_scores" not in batch.batch or "response_mask" not in batch.batch:
             return
         rollout_n = int(self.config.actor_rollout_ref.rollout.n)
-        if rollout_n <= 0:
-            return
         scores = (batch.batch["token_level_scores"] * batch.batch["response_mask"]).sum(dim=-1).float()
-        usable = (scores.shape[0] // rollout_n) * rollout_n
-        if usable == 0:
-            return
-        grouped = scores[:usable].view(-1, rollout_n)
-        group_std = grouped.std(dim=-1, unbiased=False)
-        correct = grouped >= 1.0
-        metrics["train/group_nonzero_std_ratio"] = (group_std > 0).float().mean().detach().item()
-        metrics["train/group_all_correct_ratio"] = correct.all(dim=-1).float().mean().detach().item()
-        metrics["train/group_all_wrong_ratio"] = (~correct).all(dim=-1).float().mean().detach().item()
+        uids = batch.non_tensor_batch.get("uid") if batch.non_tensor_batch is not None else None
+        group_metrics, uid_seen, metric_ready = _group_diagnostic_metrics(scores, uids=uids, rollout_n=rollout_n)
+        metrics.update(group_metrics)
+        if metric_ready:
+            metrics["train/group_metrics_uid_based"] = 1.0 if uid_seen else 0.0
 
     def _get_direct_opd_scorer(self, extpi_config: dict[str, Any]) -> InlineHFTeacherScorer:
         scorer = getattr(self, "_direct_opd_scorer", None)
@@ -288,8 +341,18 @@ class ExtPIRLSDRayPPOTrainer(RayPPOTrainer):
         if not teacher_model:
             raise ValueError("direct_opd_teacher_model_path is required when direct_opd_enabled=True")
         device = extpi_config.get("direct_opd_teacher_device", "cuda")
+        if str(device).startswith("cuda") and not torch.cuda.is_available():
+            raise RuntimeError(
+                "inline_external_hf requires CUDA visible in the trainer actor. "
+                "Set RAY_EXPERIMENTAL_NOSET_CUDA_VISIBLE_DEVICES=1 or use the multi-GPU teacher-pool entrypoint."
+            )
         dtype_name = str(extpi_config.get("direct_opd_teacher_dtype", "bfloat16"))
         dtype = getattr(torch, dtype_name)
+        load_before = (
+            torch.cuda.memory_allocated() / (1024**3)
+            if str(device).startswith("cuda") and torch.cuda.is_available()
+            else 0.0
+        )
         scorer = InlineHFTeacherScorer(
             model_path=str(teacher_model),
             dtype=dtype,
@@ -298,6 +361,12 @@ class ExtPIRLSDRayPPOTrainer(RayPPOTrainer):
             attn_implementation=str(extpi_config.get("direct_opd_attn_implementation", "flash_attention_2")),
         )
         assert_tokenizer_compatible(self.tokenizer, scorer.tokenizer)
+        load_after = (
+            torch.cuda.memory_allocated() / (1024**3)
+            if str(device).startswith("cuda") and torch.cuda.is_available()
+            else 0.0
+        )
+        self._direct_opd_inline_teacher_load_gb = max(0.0, load_after - load_before)
         self._direct_opd_scorer = scorer
         return scorer
 
@@ -307,6 +376,11 @@ class ExtPIRLSDRayPPOTrainer(RayPPOTrainer):
         prefix_width = tensors["prompts"].shape[1]
         micro_batch_size = int(extpi_config.get("direct_opd_teacher_micro_batch_size", 1))
         outputs = []
+        device = str(extpi_config.get("direct_opd_teacher_device", "cuda"))
+        track_cuda = device.startswith("cuda") and torch.cuda.is_available()
+        if track_cuda:
+            torch.cuda.reset_peak_memory_stats()
+        score_start = time.perf_counter()
         for start in range(0, tensors["responses"].shape[0], micro_batch_size):
             end = start + micro_batch_size
             scored = scorer.score(
@@ -319,6 +393,10 @@ class ExtPIRLSDRayPPOTrainer(RayPPOTrainer):
                 )
             )
             outputs.append(scored.response_log_probs.detach().cpu())
+        self._direct_opd_inline_teacher_score_time = time.perf_counter() - score_start
+        self._direct_opd_inline_teacher_max_memory_allocated_gb = (
+            torch.cuda.max_memory_allocated() / (1024**3) if track_cuda else 0.0
+        )
         return torch.cat(outputs, dim=0)
 
     def _before_actor_update(
@@ -377,6 +455,13 @@ class ExtPIRLSDRayPPOTrainer(RayPPOTrainer):
             metrics["opd/teacher_delta_mean"] = masked_mean(
                 teacher_log_probs - batch.batch["old_log_probs"], mask
             ).detach().item()
+            metrics["opd/inline_teacher_load_gb"] = float(getattr(self, "_direct_opd_inline_teacher_load_gb", 0.0))
+            metrics["opd/inline_teacher_score_time"] = float(
+                getattr(self, "_direct_opd_inline_teacher_score_time", 0.0)
+            )
+            metrics["opd/inline_teacher_max_memory_allocated_gb"] = float(
+                getattr(self, "_direct_opd_inline_teacher_max_memory_allocated_gb", 0.0)
+            )
             return batch
 
         teacher_update_mode = extpi_config.get("teacher_update_mode", "base_no_adapter")
@@ -410,7 +495,6 @@ class ExtPIRLSDRayPPOTrainer(RayPPOTrainer):
         mask = batch.batch["response_mask"].bool()
         metrics.update(build.metrics)
         metrics["train/step_teacher_tokens"] = metrics["extpi/pi_teacher_response_tokens"]
-        metrics["privacy/student_prompt_pi_leak_count"] = 0.0
         metrics["extpi/teacher_pi_logp_mean"] = masked_mean(teacher_log_probs, mask).detach().item()
         metrics["extpi/teacher_pi_delta_mean"] = masked_mean(
             teacher_log_probs - batch.batch["old_log_probs"], mask

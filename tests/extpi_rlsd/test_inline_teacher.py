@@ -29,7 +29,9 @@ class FakeTokenizer:
 def _source_batch():
     return DataProto.from_dict(
         tensors={
+            "prompts": torch.tensor([[101, 102, 0, 0], [201, 202, 203, 0]]),
             "responses": torch.tensor([[11, 12, 0], [21, 22, 23]]),
+            "attention_mask": torch.tensor([[1, 1, 0, 0, 1, 1, 0], [1, 1, 1, 0, 1, 1, 1]]),
             "response_mask": torch.tensor([[1, 1, 0], [1, 1, 1]]),
             "old_log_probs": torch.zeros(2, 3),
         },
@@ -69,15 +71,18 @@ def test_pi_teacher_score_batch_preserves_original_response_ids():
     assert all("trace" in prompt for prompt in built.prompts)
 
 
-def test_direct_opd_teacher_score_batch_uses_problem_only_prompt():
+def test_direct_opd_teacher_score_batch_reuses_student_prompt_tokens():
     batch = _source_batch()
+    batch.non_tensor_batch["extra_info"][0]["problem"] = "template drift should not be retokenized"
     built = build_direct_opd_teacher_score_batch(
         source_batch=batch,
         tokenizer=FakeTokenizer(),
         max_prompt_length=256,
     )
 
-    assert all("trace" not in prompt for prompt in built.prompts)
+    assert built.prompts == []
+    assert torch.equal(built.batch.batch["prompts"], batch.batch["prompts"])
+    assert torch.equal(built.batch.batch["attention_mask"][:, :4], batch.batch["attention_mask"][:, :4])
     assert built.batch.batch["responses"].tolist() == batch.batch["responses"].tolist()
     prefix_width = built.batch.batch["prompts"].shape[1]
     assert torch.equal(built.batch.batch["input_ids"][:, prefix_width:], built.batch.batch["responses"])
@@ -122,6 +127,8 @@ def test_extpi_hook_injects_teacher_pi_log_probs_from_ref_path():
     assert torch.allclose(out.batch["teacher_pi_log_probs"], expected)
     assert metrics["extpi/pi_teacher_response_tokens"] == 5.0
     assert "extpi/teacher_pi_delta_mean" in metrics
+    assert metrics["privacy/student_prompt_pi_leak_checked_count"] == 2.0
+    assert metrics["privacy/student_prompt_pi_leak_count"] == 0.0
 
 
 def test_direct_opd_hook_injects_teacher_log_probs_from_inline_scorer():
@@ -149,6 +156,7 @@ def test_direct_opd_hook_injects_teacher_log_probs_from_inline_scorer():
     def fake_score_inline(build, extpi_config):
         assert extpi_config["direct_opd_teacher_model_path"] == "fake-teacher"
         prefix_width = build.batch.batch["prompts"].shape[1]
+        assert torch.equal(build.batch.batch["prompts"], torch.tensor([[101, 102, 0, 0], [201, 202, 203, 0]]))
         assert torch.equal(build.batch.batch["input_ids"][:, prefix_width:], build.batch.batch["responses"])
         return build.batch.batch["responses"].float() / 10
 
@@ -160,6 +168,7 @@ def test_direct_opd_hook_injects_teacher_log_probs_from_inline_scorer():
     assert torch.allclose(out.batch["teacher_opd_log_probs"], expected)
     assert metrics["opd/teacher_response_tokens"] == 5.0
     assert metrics["train/step_teacher_tokens"] == 5.0
+    assert "opd/inline_teacher_score_time" in metrics
 
 
 def test_extpi_score_batch_requires_pi_trace():
@@ -171,3 +180,23 @@ def test_extpi_score_batch_requires_pi_trace():
         assert "qwen8b_pi_trace" in str(exc)
         return
     raise AssertionError("Expected missing PI trace to fail")
+
+
+def test_training_group_diagnostics_use_uid_after_batch_reorder():
+    trainer = ExtPIRLSDRayPPOTrainer.__new__(ExtPIRLSDRayPPOTrainer)
+    trainer.config = OmegaConf.create({"actor_rollout_ref": {"rollout": {"n": 4}}})
+    batch = DataProto.from_dict(
+        tensors={
+            "response_mask": torch.ones(8, 1),
+            "token_level_scores": torch.tensor([[1.0], [1.0], [0.0], [1.0], [1.0], [1.0], [0.0], [1.0]]),
+        },
+        non_tensors={"uid": np.array(["a", "b", "a", "b", "a", "b", "a", "b"], dtype=object)},
+    )
+
+    metrics = {}
+    trainer._add_training_diagnostics(batch, metrics)
+
+    assert metrics["train/group_metrics_uid_based"] == 1.0
+    assert metrics["train/group_nonzero_std_ratio"] == 0.5
+    assert metrics["train/group_all_correct_ratio"] == 0.5
+    assert metrics["train/group_all_wrong_ratio"] == 0.0

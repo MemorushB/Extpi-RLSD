@@ -14,7 +14,8 @@ checkout is focused on the ExtPI-RLSD experiments.
 
 ## Methods
 
-The recipe compares Qwen3-1.7B LoRA under a single-GPU setup:
+The recipe compares Qwen3-1.7B LoRA under single-GPU smoke entrypoints and
+separate multi-GPU scale-out entrypoints:
 
 - `closed_sft`: closed-model visible-solution SFT.
 - `grpo`: math-verifier GRPO.
@@ -56,7 +57,7 @@ environment must provide `torch`, `ray`, `transformers`, `peft`, `vllm`,
 
 ## GPU Constraint
 
-Recipe scripts default to gpu6 only:
+Single-card recipe scripts default to gpu6 only:
 
 ```bash
 CUDA_VISIBLE_DEVICES=6
@@ -66,6 +67,9 @@ NGPUS_PER_NODE=1
 
 The scripts exit if a different GPU is selected unless the script is
 intentionally edited.
+
+Multi-GPU scripts are opt-in and use `_env_multi.sh`, which does not apply the
+gpu6 guard. Set `CUDA_VISIBLE_DEVICES` explicitly before using them.
 
 ## Data Flow
 
@@ -98,8 +102,8 @@ bash recipes/extpi_rlsd/scripts/02b_build_closed_sft_parquet.sh
 
 ## Run Entrypoints
 
-These commands are the intended smoke entrypoints once data and dependencies are
-ready. They do not bypass the gpu6 guard.
+These commands are the intended single-card smoke entrypoints once data and
+dependencies are ready. They do not bypass the gpu6 guard.
 
 ```bash
 TOTAL_TRAINING_STEPS=5 bash recipes/extpi_rlsd/scripts/run_grpo.sh
@@ -114,6 +118,38 @@ resource pool, and performs a tokenizer compatibility preflight before
 training. `run_extpi_rlsd.sh` uses
 `verl.trainer.extpi_rlsd.main_extpi_rlsd`, which runs the legacy PPO trainer
 hook that materializes `teacher_pi_log_probs`.
+
+## Multi-GPU Entrypoints
+
+Use these only when multiple GPUs are intentionally allocated:
+
+```bash
+CUDA_VISIBLE_DEVICES=0,1,2,3 \
+NGPUS_PER_NODE=4 \
+SCALE_MODE=fixed \
+TOTAL_TRAINING_STEPS=5 \
+bash recipes/extpi_rlsd/scripts/run_extpi_rlsd_multi.sh
+
+CUDA_VISIBLE_DEVICES=0,1,2,3 \
+NGPUS_PER_NODE=3 \
+TEACHER_NGPUS_PER_NODE=1 \
+TOTAL_TRAINING_STEPS=5 \
+bash recipes/extpi_rlsd/scripts/run_opd_pg_multi_teacher_pool.sh
+```
+
+`SCALE_MODE=fixed` keeps the research batch at 8 prompts/update for
+single-card comparability. `SCALE_MODE=linear` sets the default train batch to
+`8 * NGPUS_PER_NODE * NNODES` for throughput experiments.
+
+OPD backend choice is deliberate:
+
+- `run_opd_pg.sh`: single-card `inline_external_hf` scorer in the trainer actor.
+- `run_opd_pg_multi_teacher_pool.sh`: verl distillation teacher pool managed by
+  Ray resource pools.
+
+For a 4-GPU node, a practical OPD layout is actor/rollout on 3 GPUs and Qwen3-8B
+teacher on 1 GPU. If the teacher needs tensor parallelism, use actor/rollout on
+2 GPUs with `TEACHER_NGPUS_PER_NODE=2 TEACHER_TP_SIZE=2`.
 
 Evaluate one checkpoint and aggregate result JSON files:
 
