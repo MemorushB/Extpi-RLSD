@@ -16,7 +16,7 @@
 import torch
 from tensordict import TensorDict
 
-from verl.trainer.extpi_rlsd.rlsd import RLSDConfig, compute_rlsd_advantages
+from verl.trainer.extpi_rlsd.rlsd import RLSDConfig, compute_opd_pg_advantages, compute_rlsd_advantages
 from verl.trainer.ppo.core_algos import agg_loss, compute_value_loss, get_policy_loss_fn, kl_penalty
 from verl.utils import tensordict_utils as tu
 from verl.utils.dataset.dataset_utils import DatasetPadMode
@@ -86,10 +86,17 @@ def ppo_loss(config: ActorConfig, model_output, data: TensorDict, dp_group=None)
     # select fields and convert to padded tensor
     fields = ["response_mask", "old_log_probs", "advantages"]
     rlsd_enabled = bool(config.policy_loss.get("rlsd_enabled", False))
+    opd_pg_enabled = bool(config.policy_loss.get("opd_pg_enabled", False))
+    if rlsd_enabled and opd_pg_enabled:
+        raise ValueError("actor.policy_loss.rlsd_enabled and opd_pg_enabled are mutually exclusive")
     if rlsd_enabled:
         if "teacher_pi_log_probs" not in data:
             raise ValueError("actor.policy_loss.rlsd_enabled=True requires teacher_pi_log_probs in the update batch")
         fields.append("teacher_pi_log_probs")
+    if opd_pg_enabled:
+        if "teacher_opd_log_probs" not in data:
+            raise ValueError("actor.policy_loss.opd_pg_enabled=True requires teacher_opd_log_probs in the update batch")
+        fields.append("teacher_opd_log_probs")
     if "rollout_is_weights" in data:
         fields.append("rollout_is_weights")
     if "ref_log_prob" in data:
@@ -113,6 +120,14 @@ def ppo_loss(config: ActorConfig, model_output, data: TensorDict, dp_group=None)
             ),
         )
         metrics.update(Metric.from_dict(rlsd_metrics, aggregation=AggregationType.MEAN))
+    if opd_pg_enabled:
+        advantages, opd_metrics = compute_opd_pg_advantages(
+            teacher_log_probs=data["teacher_opd_log_probs"],
+            student_old_log_probs=old_log_prob,
+            response_mask=response_mask,
+            logratio_clip_abs=float(config.policy_loss.get("opd_logratio_clip_abs", 5.0)),
+        )
+        metrics.update(Metric.from_dict(opd_metrics, aggregation=AggregationType.MEAN))
     rollout_is_weights = data.get("rollout_is_weights", None)
 
     loss_agg_mode = config.loss_agg_mode

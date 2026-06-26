@@ -102,6 +102,21 @@ def _hf_truncated(new_tokens: Any, *, eos_token_id: int | None, max_new_tokens: 
     return len(token_ids) >= max_new_tokens and (eos_token_id is None or eos_token_id not in token_ids)
 
 
+def parse_seeds(value: str | None, num_samples: int) -> list[int]:
+    """Parse fixed evaluation seeds, extending or truncating to num_samples."""
+
+    if value:
+        seeds = [int(item.strip()) for item in value.split(",") if item.strip()]
+    else:
+        seeds = list(range(num_samples))
+    if not seeds:
+        raise ValueError("At least one evaluation seed is required")
+    if len(seeds) < num_samples:
+        start = seeds[-1] + 1
+        seeds.extend(range(start, start + num_samples - len(seeds)))
+    return seeds[:num_samples]
+
+
 def summarize_scored_items(
     *,
     run: str,
@@ -207,6 +222,8 @@ def _evaluate_hf(args: argparse.Namespace, items: list[EvalItem]) -> list[dict[s
 
     prompts = build_prompts(tokenizer, items, enable_thinking=args.enable_thinking)
     scored = []
+    seeds = parse_seeds(args.seeds, args.num_samples)
+    generation_device = next(model.parameters()).device
     for item, prompt in zip(items, prompts, strict=True):
         encoded = tokenizer(prompt, return_tensors="pt").to(model.device)
         prompt_len = int(encoded["input_ids"].shape[-1])
@@ -218,7 +235,9 @@ def _evaluate_hf(args: argparse.Namespace, items: list[EvalItem]) -> list[dict[s
         )
         greedy_new = greedy[0, prompt_len:]
         samples = []
-        for _ in range(args.num_samples):
+        for seed in seeds:
+            generator = torch.Generator(device=generation_device)
+            generator.manual_seed(seed)
             output = model.generate(
                 **encoded,
                 do_sample=True,
@@ -226,10 +245,12 @@ def _evaluate_hf(args: argparse.Namespace, items: list[EvalItem]) -> list[dict[s
                 top_p=args.top_p,
                 max_new_tokens=args.max_new_tokens,
                 pad_token_id=tokenizer.pad_token_id,
+                generator=generator,
             )
             new_tokens = output[0, prompt_len:]
             samples.append(
                 {
+                    "seed": seed,
                     "text": tokenizer.decode(new_tokens, skip_special_tokens=True),
                     "truncated": _hf_truncated(
                         new_tokens, eos_token_id=tokenizer.eos_token_id, max_new_tokens=args.max_new_tokens
@@ -261,33 +282,41 @@ def _evaluate_vllm(args: argparse.Namespace, items: list[EvalItem]) -> list[dict
     from transformers import AutoTokenizer
     from vllm import LLM, SamplingParams
 
+    if args.adapter_path:
+        raise ValueError("EVAL_BACKEND=vllm does not support adapter_path yet; use --backend hf for LoRA adapters.")
     model_path = args.checkpoint or args.model
     tokenizer = AutoTokenizer.from_pretrained(args.model, trust_remote_code=args.trust_remote_code)
     prompts = build_prompts(tokenizer, items, enable_thinking=args.enable_thinking)
     prompt_token_counts = [len(tokenizer.encode(prompt, add_special_tokens=False)) for prompt in prompts]
     llm = LLM(model=model_path, trust_remote_code=args.trust_remote_code, tensor_parallel_size=1)
     greedy_outputs = llm.generate(prompts, SamplingParams(temperature=0.0, max_tokens=args.max_new_tokens, n=1))
-    sample_outputs = llm.generate(
-        prompts,
-        SamplingParams(
-            temperature=args.temperature,
-            top_p=args.top_p,
-            max_tokens=args.max_new_tokens,
-            n=args.num_samples,
-        ),
-    )
+    seeds = parse_seeds(args.seeds, args.num_samples)
+    outputs_by_seed = [
+        llm.generate(
+            prompts,
+            SamplingParams(
+                temperature=args.temperature,
+                top_p=args.top_p,
+                max_tokens=args.max_new_tokens,
+                n=1,
+                seed=seed,
+            ),
+        )
+        for seed in seeds
+    ]
     scored = []
-    for item, prompt_tokens, greedy_output, sample_output in zip(
-        items, prompt_token_counts, greedy_outputs, sample_outputs, strict=True
+    for item_idx, (item, prompt_tokens, greedy_output) in enumerate(
+        zip(items, prompt_token_counts, greedy_outputs, strict=True)
     ):
         samples = [
             {
-                "text": output.text,
-                "truncated": getattr(output, "finish_reason", None) == "length",
+                "seed": seed,
+                "text": outputs_by_seed[seed_idx][item_idx].outputs[0].text,
+                "truncated": getattr(outputs_by_seed[seed_idx][item_idx].outputs[0], "finish_reason", None) == "length",
                 "prompt_tokens": prompt_tokens,
-                "completion_tokens": len(output.token_ids),
+                "completion_tokens": len(outputs_by_seed[seed_idx][item_idx].outputs[0].token_ids),
             }
-            for output in sample_output.outputs
+            for seed_idx, seed in enumerate(seeds)
         ]
         greedy = greedy_output.outputs[0]
         scored.append(
@@ -317,8 +346,9 @@ def main() -> None:
     parser.add_argument("--run", default=None)
     parser.add_argument("--checkpoint_name", default=None)
     parser.add_argument("--backend", choices=["hf", "vllm"], default="hf")
-    parser.add_argument("--num_samples", type=int, default=12)
-    parser.add_argument("--max_new_tokens", type=int, default=1024)
+    parser.add_argument("--num_samples", type=int, default=4)
+    parser.add_argument("--seeds", default="0,1,2,3", help="Comma-separated fixed seeds for prompt-seed eval pairs.")
+    parser.add_argument("--max_new_tokens", type=int, default=4096)
     parser.add_argument("--temperature", type=float, default=1.0)
     parser.add_argument("--top_p", type=float, default=1.0)
     parser.add_argument("--max_rows", type=int, default=None)
@@ -339,6 +369,7 @@ def main() -> None:
     payload["checkpoint_path"] = args.checkpoint
     payload["adapter_path"] = args.adapter_path
     payload["backend"] = args.backend
+    payload["seeds"] = parse_seeds(args.seeds, args.num_samples)
     output_path = Path(args.output_json)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True), encoding="utf-8")

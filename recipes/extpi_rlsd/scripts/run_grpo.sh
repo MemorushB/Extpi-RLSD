@@ -10,6 +10,7 @@ PROJECT_NAME="${PROJECT_NAME:-extpi_rlsd}"
 EXPERIMENT_NAME="${EXPERIMENT_NAME:-grpo_qwen3_1p7b_lora}"
 METHOD_NAME="${METHOD_NAME:-grpo}"
 SPLIT_MANIFEST="${SPLIT_MANIFEST:-${EXTPI_DATA_ROOT}/datasets/splits/frontier_mvp/split_manifest.json}"
+PPO_ENTRYPOINT="${PPO_ENTRYPOINT:-verl.trainer.main_ppo}"
 
 manifest_model_args=(--model "student=${MODEL_PATH}")
 if [ -n "${TEACHER_MODEL:-}" ]; then
@@ -25,7 +26,7 @@ write_extpi_run_manifest "${EXPERIMENT_NAME}" \
   --config_kv "total_training_steps=${TOTAL_TRAINING_STEPS:-5}" \
   --config_kv "rollout_n=${ROLLOUT_N:-4}"
 
-python3 -m verl.trainer.main_ppo \
+python3 -m "${PPO_ENTRYPOINT}" \
   trainer.use_v1=False \
   algorithm.adv_estimator=grpo \
   algorithm.use_kl_in_reward=False \

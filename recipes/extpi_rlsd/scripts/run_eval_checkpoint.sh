@@ -18,8 +18,9 @@ args=(
   --run "${RUN_NAME}"
   --checkpoint_name "${CHECKPOINT_NAME}"
   --backend "${EVAL_BACKEND:-hf}"
-  --num_samples "${NUM_SAMPLES:-12}"
-  --max_new_tokens "${MAX_NEW_TOKENS:-1024}"
+  --num_samples "${NUM_SAMPLES:-4}"
+  --seeds "${EVAL_SEEDS:-0,1,2,3}"
+  --max_new_tokens "${MAX_NEW_TOKENS:-4096}"
   --temperature "${EVAL_TEMPERATURE:-1.0}"
   --top_p "${EVAL_TOP_P:-1.0}"
 )

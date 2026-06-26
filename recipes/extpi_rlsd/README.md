@@ -47,12 +47,7 @@ bash recipes/extpi_rlsd/scripts/00_prepare_dataset.sh \
   --eval_jsonl /path/to/aime25.jsonl \
   --eval_jsonl /path/to/hmmt25.jsonl
 bash recipes/extpi_rlsd/scripts/01_generate_qwen8b_pi.sh
-# Generate plain/PI recipient completion JSONL files externally, then attach uplift:
-python3 tools/extpi_rlsd/compute_recipient_uplift.py \
-  --input_jsonl /data/users/rchen/extpi-rlsd/datasets/opsd_clean/all_clean_qwen8b_pi.jsonl \
-  --plain_jsonl /path/to/plain_completions.jsonl \
-  --pi_jsonl /path/to/pi_completions.jsonl \
-  --output_jsonl /data/users/rchen/extpi-rlsd/datasets/opsd_clean/all_clean_qwen8b_pi_screened.jsonl
+bash recipes/extpi_rlsd/scripts/01b_generate_recipient_uplift_completions.sh
 bash recipes/extpi_rlsd/scripts/03_build_frontier.sh
 ```
 
@@ -83,9 +78,10 @@ Direct sampled-token OPD-PG smoke:
 TOTAL_TRAINING_STEPS=5 bash recipes/extpi_rlsd/scripts/run_opd_pg.sh
 ```
 
-This baseline uses verl's distillation teacher-service path for sampled-token
-K1 OPD-PG and runs a tokenizer compatibility preflight. It is not a
-full-vocabulary or top-k GKD baseline.
+This baseline uses a single-card `inline_external_hf` teacher scorer for
+sampled-token K1 OPD-PG and runs a tokenizer compatibility preflight. It does
+not create a separate verl teacher resource pool. It is not a full-vocabulary
+or top-k GKD baseline.
 
 ExtPI-RLSD smoke:
 
@@ -112,6 +108,9 @@ bash recipes/extpi_rlsd/scripts/run_eval_checkpoint.sh
 
 bash recipes/extpi_rlsd/scripts/evaluate_all.sh
 ```
+
+Matched-dev checkpoint selection defaults to Avg@4 with fixed prompt-seed pairs
+`0,1,2,3` and `max_new_tokens=4096`.
 
 ## Public Claims Boundary
 

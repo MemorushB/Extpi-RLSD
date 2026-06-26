@@ -78,11 +78,7 @@ bash recipes/extpi_rlsd/scripts/00_prepare_dataset.sh \
   --eval_jsonl /path/to/aime25.jsonl \
   --eval_jsonl /path/to/hmmt25.jsonl
 bash recipes/extpi_rlsd/scripts/01_generate_qwen8b_pi.sh
-python3 tools/extpi_rlsd/compute_recipient_uplift.py \
-  --input_jsonl /data/users/rchen/extpi-rlsd/datasets/opsd_clean/all_clean_qwen8b_pi.jsonl \
-  --plain_jsonl /path/to/plain_completions.jsonl \
-  --pi_jsonl /path/to/pi_completions.jsonl \
-  --output_jsonl /data/users/rchen/extpi-rlsd/datasets/opsd_clean/all_clean_qwen8b_pi_screened.jsonl
+bash recipes/extpi_rlsd/scripts/01b_generate_recipient_uplift_completions.sh
 bash recipes/extpi_rlsd/scripts/03_build_frontier.sh
 ```
 
@@ -112,9 +108,10 @@ TOTAL_TRAINING_STEPS=5 bash recipes/extpi_rlsd/scripts/run_extpi_rlsd.sh
 TOTAL_TRAINING_STEPS=5 bash recipes/extpi_rlsd/scripts/run_extpi_rlsd_shuffled.sh
 ```
 
-`run_opd_pg.sh` is the Baseline 2 entrypoint. It uses verl's sampled-token
-distillation teacher-service path and performs a tokenizer compatibility
-preflight before training. `run_extpi_rlsd.sh` uses
+`run_opd_pg.sh` is the Baseline 2 entrypoint. It uses a single-card
+`inline_external_hf` teacher scorer, does not create a separate verl teacher
+resource pool, and performs a tokenizer compatibility preflight before
+training. `run_extpi_rlsd.sh` uses
 `verl.trainer.extpi_rlsd.main_extpi_rlsd`, which runs the legacy PPO trainer
 hook that materializes `teacher_pi_log_probs`.
 
@@ -128,6 +125,10 @@ bash recipes/extpi_rlsd/scripts/run_eval_checkpoint.sh
 
 bash recipes/extpi_rlsd/scripts/evaluate_all.sh
 ```
+
+The matched-dev evaluator defaults to Avg@4 with fixed prompt-seed pairs
+`0,1,2,3` and `max_new_tokens=4096`. Override with `EVAL_SEEDS` only when a run
+manifest records the change.
 
 ## Tests
 

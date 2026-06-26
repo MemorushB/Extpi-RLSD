@@ -3,7 +3,11 @@ import torch
 from omegaconf import OmegaConf
 
 from verl import DataProto
-from verl.trainer.extpi_rlsd.trainer import ExtPIRLSDRayPPOTrainer, build_pi_teacher_score_batch
+from verl.trainer.extpi_rlsd.trainer import (
+    ExtPIRLSDRayPPOTrainer,
+    build_direct_opd_teacher_score_batch,
+    build_pi_teacher_score_batch,
+)
 
 
 class FakeTokenizer:
@@ -65,6 +69,20 @@ def test_pi_teacher_score_batch_preserves_original_response_ids():
     assert all("trace" in prompt for prompt in built.prompts)
 
 
+def test_direct_opd_teacher_score_batch_uses_problem_only_prompt():
+    batch = _source_batch()
+    built = build_direct_opd_teacher_score_batch(
+        source_batch=batch,
+        tokenizer=FakeTokenizer(),
+        max_prompt_length=256,
+    )
+
+    assert all("trace" not in prompt for prompt in built.prompts)
+    assert built.batch.batch["responses"].tolist() == batch.batch["responses"].tolist()
+    prefix_width = built.batch.batch["prompts"].shape[1]
+    assert torch.equal(built.batch.batch["input_ids"][:, prefix_width:], built.batch.batch["responses"])
+
+
 def test_extpi_hook_injects_teacher_pi_log_probs_from_ref_path():
     trainer = ExtPIRLSDRayPPOTrainer.__new__(ExtPIRLSDRayPPOTrainer)
     trainer.tokenizer = FakeTokenizer()
@@ -104,6 +122,44 @@ def test_extpi_hook_injects_teacher_pi_log_probs_from_ref_path():
     assert torch.allclose(out.batch["teacher_pi_log_probs"], expected)
     assert metrics["extpi/pi_teacher_response_tokens"] == 5.0
     assert "extpi/teacher_pi_delta_mean" in metrics
+
+
+def test_direct_opd_hook_injects_teacher_log_probs_from_inline_scorer():
+    trainer = ExtPIRLSDRayPPOTrainer.__new__(ExtPIRLSDRayPPOTrainer)
+    trainer.tokenizer = FakeTokenizer()
+    trainer.config = OmegaConf.create(
+        {
+            "data": {"max_prompt_length": 256},
+            "actor_rollout_ref": {
+                "rollout": {"n": 2},
+                "actor": {
+                    "policy_loss": {
+                        "opd_pg_enabled": True,
+                    }
+                },
+            },
+            "extpi_rlsd": {
+                "direct_opd_teacher_backend": "inline_external_hf",
+                "direct_opd_teacher_model_path": "fake-teacher",
+                "direct_opd_teacher_max_prompt_length": 256,
+            },
+        }
+    )
+
+    def fake_score_inline(build, extpi_config):
+        assert extpi_config["direct_opd_teacher_model_path"] == "fake-teacher"
+        prefix_width = build.batch.batch["prompts"].shape[1]
+        assert torch.equal(build.batch.batch["input_ids"][:, prefix_width:], build.batch.batch["responses"])
+        return build.batch.batch["responses"].float() / 10
+
+    trainer._score_direct_opd_inline = fake_score_inline
+    metrics = {}
+    out = trainer._before_actor_update(_source_batch(), metrics=metrics, timing_raw={})
+
+    expected = torch.tensor([[1.1, 1.2, 0.0], [2.1, 2.2, 2.3]])
+    assert torch.allclose(out.batch["teacher_opd_log_probs"], expected)
+    assert metrics["opd/teacher_response_tokens"] == 5.0
+    assert metrics["train/step_teacher_tokens"] == 5.0
 
 
 def test_extpi_score_batch_requires_pi_trace():

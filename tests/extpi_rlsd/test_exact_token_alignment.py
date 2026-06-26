@@ -1,6 +1,29 @@
 import torch
 
-from verl.trainer.extpi_rlsd.scorer import build_causal_score_inputs, gather_response_log_probs
+from verl.trainer.extpi_rlsd.scorer import (
+    assert_tokenizer_compatible,
+    build_causal_score_inputs,
+    gather_response_log_probs,
+)
+
+
+class _CompatTokenizer:
+    vocab_size = 2
+    bos_token_id = 0
+    eos_token_id = 1
+    pad_token_id = 1
+    special_tokens_map = {"eos_token": "</s>"}
+    chat_template = "template"
+
+    def __init__(self, vocab):
+        self._vocab = vocab
+
+    def get_vocab(self):
+        return dict(self._vocab)
+
+    def encode(self, text, add_special_tokens=False):
+        del add_special_tokens
+        return [self._vocab.get(text, 0)]
 
 
 def test_response_tokens_are_appended_without_retokenization_and_offsets_are_correct():
@@ -57,3 +80,15 @@ def test_temperature_changes_gathered_logprob_distribution():
     )
 
     assert cold.item() > hot.item()
+
+
+def test_tokenizer_compatibility_checks_full_vocab_mapping():
+    left = _CompatTokenizer({"x": 0, "y": 1})
+    right = _CompatTokenizer({"x": 0, "y": 2})
+
+    try:
+        assert_tokenizer_compatible(left, right, sample_strings=["x"])
+    except ValueError as exc:
+        assert "full_vocab_mapping" in str(exc)
+        return
+    raise AssertionError("Expected full vocab mismatch to fail")

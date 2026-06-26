@@ -1,4 +1,4 @@
-from tools.extpi_rlsd.evaluate_checkpoints import summarize_scored_items
+from tools.extpi_rlsd.evaluate_checkpoints import parse_seeds, summarize_scored_items
 
 
 def test_summarize_scored_items_outputs_aggregator_fields():
@@ -35,3 +35,8 @@ def test_summarize_scored_items_outputs_aggregator_fields():
     assert payload["format_rate"] == 0.75
     assert payload["total_samples"] == 4
     assert "group_variance" in payload
+
+
+def test_parse_seeds_extends_and_truncates_to_num_samples():
+    assert parse_seeds("7,8", 4) == [7, 8, 9, 10]
+    assert parse_seeds("1,2,3", 2) == [1, 2]

@@ -132,6 +132,9 @@ def assert_tokenizer_compatible(
         ),
     ]
     failures = [name for name, left, right in checks if left != right]
+    if hasattr(student_tokenizer, "get_vocab") and hasattr(teacher_tokenizer, "get_vocab"):
+        if student_tokenizer.get_vocab() != teacher_tokenizer.get_vocab():
+            failures.append("full_vocab_mapping")
     for text in sample_strings or ["x", "\\boxed{1}", "Solve the problem.", "<|im_start|>user"]:
         if student_tokenizer.encode(text, add_special_tokens=False) != teacher_tokenizer.encode(
             text, add_special_tokens=False
