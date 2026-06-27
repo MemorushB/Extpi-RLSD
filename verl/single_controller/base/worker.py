@@ -277,6 +277,10 @@ class Worker(WorkerHelper):
             # so we need to set local rank when the flag is set.
             device_name = get_resource_name()
             local_rank = ray.get_runtime_context().get_accelerator_ids()[device_name][0]
+            visible_devices = os.environ.get(get_visible_devices_keyword().upper(), "")
+            visible_device_list = [device.strip() for device in visible_devices.split(",") if device.strip()]
+            if visible_device_list and local_rank in visible_device_list:
+                local_rank = str(visible_device_list.index(local_rank))
             os.environ["LOCAL_RANK"] = local_rank
             get_torch_device().set_device(int(local_rank))
 
