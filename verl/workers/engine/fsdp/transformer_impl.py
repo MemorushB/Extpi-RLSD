@@ -19,7 +19,8 @@ import gc
 import logging
 import os
 import warnings
-from contextlib import nullcontext
+from contextlib import contextmanager, nullcontext
+from copy import deepcopy
 from typing import Callable, ContextManager, Optional
 
 import torch
@@ -342,19 +343,28 @@ class FSDPEngine(BaseEngine):
                 "bias": "none",
             }
             module = get_peft_model(module, LoraConfig(**lora_config))
+            peft_config = module.peft_config["default"]
 
-            # FSDP requires all params in a flat group to share dtype: cast a
-            # fp32 adapter to the bf16 base dtype only when they actually differ.
-            base_dtype = next((p.dtype for p in module.parameters() if not p.requires_grad), None)
-            if base_dtype is not None:
-                mismatched = [p for p in module.parameters() if p.requires_grad and p.dtype != base_dtype]
-                if mismatched:
-                    logger.info(
-                        f"Casting {len(mismatched)} LoRA adapter params from "
-                        f"{mismatched[0].dtype} to {base_dtype} to match base."
-                    )
-                    for param in mismatched:
-                        param.data = param.data.to(base_dtype)
+        if bool(getattr(self.model_config, "extpi_teacher_adapter", False)):
+            if "extpi_teacher" not in module.peft_config:
+                module.add_adapter("extpi_teacher", deepcopy(peft_config))
+            for name, param in module.named_parameters():
+                if ".extpi_teacher." in name:
+                    param.requires_grad = False
+            module.set_adapter("default")
+
+        # FSDP requires all params in a flat group to share dtype: cast LoRA
+        # adapter params to the base dtype only when they actually differ.
+        base_dtype = next((p.dtype for name, p in module.named_parameters() if "lora_" not in name), None)
+        if base_dtype is not None:
+            mismatched = [p for name, p in module.named_parameters() if "lora_" in name and p.dtype != base_dtype]
+            if mismatched:
+                logger.info(
+                    f"Casting {len(mismatched)} LoRA adapter params from "
+                    f"{mismatched[0].dtype} to {base_dtype} to match base."
+                )
+                for param in mismatched:
+                    param.data = param.data.to(base_dtype)
 
         return module
 
@@ -895,6 +905,90 @@ class FSDPEngine(BaseEngine):
 
     def disable_adapter(self) -> ContextManager:
         return self.module.disable_adapter()
+
+    def _peft_module(self):
+        module = self.module
+        if hasattr(module, "set_adapter") and hasattr(module, "peft_config"):
+            return module
+        wrapped = getattr(module, "_fsdp_wrapped_module", None)
+        if wrapped is not None and hasattr(wrapped, "set_adapter") and hasattr(wrapped, "peft_config"):
+            return wrapped
+        return module
+
+    @staticmethod
+    def _active_adapter_name(module) -> str | None:
+        active = getattr(module, "active_adapter", None)
+        if active is None:
+            active = getattr(module, "active_adapters", None)
+        if isinstance(active, (list, tuple)):
+            return str(active[0]) if active else None
+        return str(active) if active else None
+
+    @contextmanager
+    def adapter_context(self, adapter_name: str) -> ContextManager:
+        module = self._peft_module()
+        peft_config = getattr(module, "peft_config", {})
+        if adapter_name not in peft_config:
+            raise ValueError(f"LoRA adapter {adapter_name!r} is not available")
+        previous = self._active_adapter_name(module)
+        module.set_adapter(adapter_name)
+        try:
+            yield
+        finally:
+            if previous:
+                module.set_adapter(previous)
+
+    @staticmethod
+    def _copy_lora_adapter_weights(module, source_adapter: str, target_adapter: str) -> int:
+        from peft.tuners.lora import LoraLayer
+
+        copied = 0
+        for lora_layer in module.modules():
+            if not isinstance(lora_layer, LoraLayer):
+                continue
+            for attr_name in ("lora_A", "lora_B", "lora_embedding_A", "lora_embedding_B"):
+                mapping = getattr(lora_layer, attr_name, None)
+                if mapping is None or source_adapter not in mapping or target_adapter not in mapping:
+                    continue
+                source = mapping[source_adapter]
+                target = mapping[target_adapter]
+                if isinstance(source, torch.nn.Parameter):
+                    target.data.copy_(source.data)
+                    copied += target.numel()
+                elif hasattr(source, "state_dict") and hasattr(target, "load_state_dict"):
+                    target.load_state_dict(source.state_dict())
+                    copied += sum(param.numel() for param in target.parameters())
+                elif torch.is_tensor(source):
+                    target.data.copy_(source.data)
+                    copied += target.numel()
+            if hasattr(lora_layer, "scaling") and source_adapter in lora_layer.scaling:
+                lora_layer.scaling[target_adapter] = lora_layer.scaling[source_adapter]
+        return copied
+
+    def sync_lora_adapter_snapshot(self, source_adapter: str = "default", target_adapter: str = "extpi_teacher") -> int:
+        module = self._peft_module()
+        peft_config = getattr(module, "peft_config", {})
+        if source_adapter not in peft_config:
+            raise ValueError(f"LoRA adapter {source_adapter!r} is not available")
+        if target_adapter not in peft_config:
+            raise ValueError(f"LoRA adapter {target_adapter!r} is not available")
+
+        version = fsdp_version(self.module)
+        if version == 1:
+            sync_context = FSDP.summon_full_params(self.module, writeback=True, with_grads=False)
+        elif version == 0:
+            sync_context = nullcontext()
+        else:
+            raise NotImplementedError(f"ExtPI teacher snapshot sync does not support FSDP version {version}")
+
+        active = self._active_adapter_name(module)
+        with torch.no_grad(), sync_context:
+            copied = self._copy_lora_adapter_weights(module, source_adapter, target_adapter)
+        if copied <= 0:
+            raise ValueError(f"No LoRA weights copied from {source_adapter!r} to {target_adapter!r}")
+        if active:
+            module.set_adapter(active)
+        return copied
 
 
 class EngineEvalModeCtx(BaseEngineCtx):

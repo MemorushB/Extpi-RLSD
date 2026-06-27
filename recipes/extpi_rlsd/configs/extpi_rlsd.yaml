@@ -5,7 +5,8 @@ rlsd:
   lambda: 0.5
   reweight_clip_range: 0.2
   lambda_warmup_steps: 0
-  lambda_decay_steps: 50
+  lambda_decay_steps: 0
   negative_only: false
   thought_only: false
   teacher_update_mode: base_no_adapter
+  teacher_sync_interval: 20

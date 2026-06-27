@@ -226,6 +226,20 @@ class BaseEngine:
         """
         return nullcontext()
 
+    def adapter_context(self, adapter_name: str) -> ContextManager:
+        """
+        Activate one adapter temporarily under the context in the model for LoRA.
+        """
+        del adapter_name
+        return nullcontext()
+
+    def sync_lora_adapter_snapshot(self, source_adapter: str = "default", target_adapter: str = "extpi_teacher") -> int:
+        """
+        Copy LoRA weights from one adapter to another frozen adapter snapshot.
+        """
+        del source_adapter, target_adapter
+        raise NotImplementedError("LoRA adapter snapshot sync is not implemented for this engine")
+
 
 class BaseEngineCtx:
     def __init__(self, engine: BaseEngine, mode, **kwargs):

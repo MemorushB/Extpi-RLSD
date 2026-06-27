@@ -100,6 +100,8 @@ class PolicyLossConfig(BaseConfig):
     rollout_correction: RolloutCorrectionConfig = field(default_factory=RolloutCorrectionConfig)
     rlsd_enabled: bool = False
     rlsd_lambda: float = 0.5
+    rlsd_lambda_warmup_steps: int = 0
+    rlsd_lambda_decay_steps: int = 0
     rlsd_reweight_clip_range: float = 0.2
     rlsd_negative_only: bool = False
     rlsd_delta_student_logp_source: str = "current"

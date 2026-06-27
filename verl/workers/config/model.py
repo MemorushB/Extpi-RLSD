@@ -133,6 +133,7 @@ class HFModelConfig(BaseConfig):
 
     # path to pre-trained LoRA adapter to load for continued training
     lora_adapter_path: Optional[str] = None
+    extpi_teacher_adapter: bool = False
     use_liger: bool = False
 
     use_fused_kernels: bool = False

@@ -214,6 +214,154 @@ def test_extpi_hook_injects_teacher_pi_log_probs_from_ref_path():
     assert metrics["privacy/student_prompt_pi_leak_count"] == 0.0
 
 
+def test_extpi_current_no_grad_uses_current_actor_adapter():
+    trainer = ExtPIRLSDRayPPOTrainer.__new__(ExtPIRLSDRayPPOTrainer)
+    trainer.tokenizer = FakeTokenizer()
+    trainer.ref_in_actor = True
+    trainer.global_steps = 3
+    trainer.config = OmegaConf.create(
+        {
+            "data": {"max_prompt_length": 256},
+            "actor_rollout_ref": {
+                "model": {"extpi_teacher_adapter": False},
+                "rollout": {"temperature": 1.0, "n": 2},
+                "actor": {
+                    "policy_loss": {
+                        "rlsd_enabled": True,
+                        "rlsd_lambda": 0.5,
+                        "rlsd_lambda_warmup_steps": 0,
+                        "rlsd_lambda_decay_steps": 0,
+                    }
+                },
+            },
+            "extpi_rlsd": {
+                "teacher_update_mode": "current_no_grad",
+                "teacher_max_prompt_length": 256,
+                "allow_teacher_prompt_truncation": True,
+                "online_teacher_thinking": False,
+            },
+        }
+    )
+    captured = {}
+
+    def fake_compute_actor_log_prob(score_batch, *, no_lora_adapter=False, lora_adapter_name=None):
+        captured["no_lora_adapter"] = no_lora_adapter
+        captured["lora_adapter_name"] = lora_adapter_name
+        return DataProto.from_dict(tensors={"ref_log_prob": score_batch.batch["responses"].float() / 100})
+
+    trainer._compute_actor_log_prob = fake_compute_actor_log_prob
+    metrics = {}
+    out = trainer._before_actor_update(_source_batch(), metrics=metrics, timing_raw={})
+
+    assert captured == {"no_lora_adapter": False, "lora_adapter_name": None}
+    assert torch.allclose(out.batch["teacher_pi_log_probs"], torch.tensor([[0.11, 0.12, 0.0], [0.21, 0.22, 0.23]]))
+    assert out.meta_info["rlsd_effective_lambda"] == 0.5
+
+
+def test_extpi_periodic_snapshot_syncs_and_uses_teacher_adapter():
+    class FakeActorRolloutWG:
+        def __init__(self):
+            self.calls = []
+
+        def sync_extpi_teacher_snapshot(self, **kwargs):
+            self.calls.append(kwargs)
+
+    trainer = ExtPIRLSDRayPPOTrainer.__new__(ExtPIRLSDRayPPOTrainer)
+    trainer.tokenizer = FakeTokenizer()
+    trainer.ref_in_actor = True
+    trainer.global_steps = 1
+    trainer._extpi_teacher_last_sync_step = None
+    trainer.actor_rollout_wg = FakeActorRolloutWG()
+    trainer.config = OmegaConf.create(
+        {
+            "data": {"max_prompt_length": 256},
+            "actor_rollout_ref": {
+                "model": {"extpi_teacher_adapter": True},
+                "rollout": {"temperature": 1.0, "n": 2},
+                "actor": {
+                    "policy_loss": {
+                        "rlsd_enabled": True,
+                        "rlsd_lambda": 0.5,
+                        "rlsd_lambda_warmup_steps": 0,
+                        "rlsd_lambda_decay_steps": 0,
+                    }
+                },
+            },
+            "extpi_rlsd": {
+                "teacher_update_mode": "periodic_snapshot",
+                "teacher_sync_interval": 20,
+                "teacher_max_prompt_length": 256,
+                "allow_teacher_prompt_truncation": True,
+                "online_teacher_thinking": False,
+            },
+        }
+    )
+    captured = {}
+
+    def fake_compute_actor_log_prob(score_batch, *, no_lora_adapter=False, lora_adapter_name=None):
+        del no_lora_adapter
+        captured["lora_adapter_name"] = lora_adapter_name
+        return DataProto.from_dict(tensors={"ref_log_prob": score_batch.batch["responses"].float() / 100})
+
+    trainer._compute_actor_log_prob = fake_compute_actor_log_prob
+    metrics = {}
+    trainer._before_actor_update(_source_batch(), metrics=metrics, timing_raw={})
+
+    assert captured["lora_adapter_name"] == "extpi_teacher"
+    assert trainer.actor_rollout_wg.calls == [{"source_adapter": "default", "target_adapter": "extpi_teacher"}]
+    assert metrics["extpi/teacher_snapshot_synced"] == 1.0
+    assert metrics["extpi/teacher_snapshot_step"] == 1.0
+    assert metrics["extpi/teacher_sync_interval"] == 20.0
+
+
+def test_extpi_periodic_snapshot_rejects_non_positive_sync_interval():
+    trainer = ExtPIRLSDRayPPOTrainer.__new__(ExtPIRLSDRayPPOTrainer)
+    trainer.tokenizer = FakeTokenizer()
+    trainer.ref_in_actor = True
+    trainer.global_steps = 1
+    trainer._extpi_teacher_last_sync_step = None
+    trainer.config = OmegaConf.create(
+        {
+            "data": {"max_prompt_length": 256},
+            "actor_rollout_ref": {
+                "model": {"extpi_teacher_adapter": True},
+                "rollout": {"temperature": 1.0, "n": 2},
+                "actor": {"policy_loss": {"rlsd_enabled": True}},
+            },
+            "extpi_rlsd": {
+                "teacher_update_mode": "periodic_snapshot",
+                "teacher_sync_interval": 0,
+                "teacher_max_prompt_length": 256,
+            },
+        }
+    )
+
+    try:
+        trainer._before_actor_update(_source_batch(), metrics={}, timing_raw={})
+    except ValueError as exc:
+        assert "teacher_sync_interval" in str(exc)
+        return
+    raise AssertionError("Expected periodic_snapshot with sync interval 0 to fail")
+
+
+def test_extpi_effective_lambda_schedule_matches_warmup_and_decay():
+    trainer = ExtPIRLSDRayPPOTrainer.__new__(ExtPIRLSDRayPPOTrainer)
+    policy_loss = {
+        "rlsd_lambda": 0.5,
+        "rlsd_lambda_warmup_steps": 10,
+        "rlsd_lambda_decay_steps": 100,
+    }
+
+    trainer.global_steps = 5
+    assert trainer._compute_effective_rlsd_lambda(policy_loss) == 0.25
+    trainer.global_steps = 10
+    assert trainer._compute_effective_rlsd_lambda(policy_loss) == 0.5
+    trainer.global_steps = 60
+    assert trainer._compute_effective_rlsd_lambda(policy_loss) == 0.25
+    trainer.global_steps = 110
+    assert trainer._compute_effective_rlsd_lambda(policy_loss) == 0.0
+
+
 def test_direct_opd_hook_injects_teacher_log_probs_from_inline_scorer():
     trainer = ExtPIRLSDRayPPOTrainer.__new__(ExtPIRLSDRayPPOTrainer)
     trainer.tokenizer = FakeTokenizer()

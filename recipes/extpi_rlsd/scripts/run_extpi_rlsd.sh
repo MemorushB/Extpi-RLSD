@@ -10,8 +10,25 @@ PROJECT_NAME="${PROJECT_NAME:-extpi_rlsd}"
 EXPERIMENT_NAME="${EXPERIMENT_NAME:-extpi_rlsd_qwen3_1p7b_lora}"
 SPLIT_MANIFEST="${SPLIT_MANIFEST:-${EXTPI_DATA_ROOT}/datasets/splits/frontier_mvp/split_manifest.json}"
 RLSD_LAMBDA="${RLSD_LAMBDA:-0.5}"
+RLSD_LAMBDA_WARMUP_STEPS="${RLSD_LAMBDA_WARMUP_STEPS:-0}"
+RLSD_LAMBDA_DECAY_STEPS="${RLSD_LAMBDA_DECAY_STEPS:-0}"
 RLSD_CLIP_RANGE="${RLSD_CLIP_RANGE:-0.2}"
 TEACHER_MAX_PROMPT_LENGTH="${TEACHER_MAX_PROMPT_LENGTH:-2048}"
+TEACHER_UPDATE_MODE="${TEACHER_UPDATE_MODE:-base_no_adapter}"
+TEACHER_SYNC_INTERVAL="${TEACHER_SYNC_INTERVAL:-20}"
+EXTPI_TEACHER_ADAPTER=False
+
+case "${TEACHER_UPDATE_MODE}" in
+  base_no_adapter|current_no_grad)
+    ;;
+  periodic_snapshot)
+    EXTPI_TEACHER_ADAPTER=True
+    ;;
+  *)
+    echo "TEACHER_UPDATE_MODE must be base_no_adapter, current_no_grad, or periodic_snapshot; got ${TEACHER_UPDATE_MODE}" >&2
+    exit 1
+    ;;
+esac
 
 write_extpi_run_manifest "${EXPERIMENT_NAME}" \
   --model "student=${MODEL_PATH}" \
@@ -20,8 +37,11 @@ write_extpi_run_manifest "${EXPERIMENT_NAME}" \
   --config_kv "train_file=${TRAIN_FILE}" \
   --config_kv "val_file=${VAL_FILE}" \
   --config_kv "rlsd_lambda=${RLSD_LAMBDA}" \
+  --config_kv "rlsd_lambda_warmup_steps=${RLSD_LAMBDA_WARMUP_STEPS}" \
+  --config_kv "rlsd_lambda_decay_steps=${RLSD_LAMBDA_DECAY_STEPS}" \
   --config_kv "rlsd_clip_range=${RLSD_CLIP_RANGE}" \
-  --config_kv "teacher_update_mode=base_no_adapter" \
+  --config_kv "teacher_update_mode=${TEACHER_UPDATE_MODE}" \
+  --config_kv "teacher_sync_interval=${TEACHER_SYNC_INTERVAL}" \
   --config_kv "teacher_max_prompt_length=${TEACHER_MAX_PROMPT_LENGTH}" \
   --config_kv "total_training_steps=${TOTAL_TRAINING_STEPS:-5}" \
   --config_kv "rollout_n=${ROLLOUT_N:-4}"
@@ -46,6 +66,7 @@ python3 -m verl.trainer.extpi_rlsd.main_extpi_rlsd \
   actor_rollout_ref.model.enable_gradient_checkpointing=True \
   actor_rollout_ref.model.lora_rank=32 \
   actor_rollout_ref.model.lora_alpha=64 \
+  actor_rollout_ref.model.extpi_teacher_adapter="${EXTPI_TEACHER_ADAPTER}" \
   actor_rollout_ref.actor.optim.lr="${ACTOR_LR:-3e-6}" \
   actor_rollout_ref.actor.ppo_mini_batch_size="${PPO_MINI_BATCH_SIZE:-8}" \
   actor_rollout_ref.actor.ppo_micro_batch_size_per_gpu=1 \
@@ -55,6 +76,8 @@ python3 -m verl.trainer.extpi_rlsd.main_extpi_rlsd \
   actor_rollout_ref.actor.entropy_coeff=0 \
   actor_rollout_ref.actor.policy_loss.rlsd_enabled=True \
   actor_rollout_ref.actor.policy_loss.rlsd_lambda="${RLSD_LAMBDA}" \
+  actor_rollout_ref.actor.policy_loss.rlsd_lambda_warmup_steps="${RLSD_LAMBDA_WARMUP_STEPS}" \
+  actor_rollout_ref.actor.policy_loss.rlsd_lambda_decay_steps="${RLSD_LAMBDA_DECAY_STEPS}" \
   actor_rollout_ref.actor.policy_loss.rlsd_reweight_clip_range="${RLSD_CLIP_RANGE}" \
   actor_rollout_ref.actor.policy_loss.rlsd_negative_only="${RLSD_NEGATIVE_ONLY:-False}" \
   actor_rollout_ref.rollout.name=vllm \
@@ -66,7 +89,8 @@ python3 -m verl.trainer.extpi_rlsd.main_extpi_rlsd \
   actor_rollout_ref.rollout.max_num_batched_tokens="${MAX_NUM_BATCHED_TOKENS:-8192}" \
   actor_rollout_ref.rollout.free_cache_engine=True \
   actor_rollout_ref.rollout.log_prob_micro_batch_size_per_gpu="${ROLLOUT_LOG_PROB_MICRO_BATCH_SIZE_PER_GPU:-1}" \
-  +extpi_rlsd.teacher_update_mode=base_no_adapter \
+  +extpi_rlsd.teacher_update_mode="${TEACHER_UPDATE_MODE}" \
+  +extpi_rlsd.teacher_sync_interval="${TEACHER_SYNC_INTERVAL}" \
   +extpi_rlsd.teacher_max_prompt_length="${TEACHER_MAX_PROMPT_LENGTH}" \
   +extpi_rlsd.allow_teacher_prompt_truncation="${ALLOW_TEACHER_PROMPT_TRUNCATION:-True}" \
   +extpi_rlsd.online_teacher_thinking=False \

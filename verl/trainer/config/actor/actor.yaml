@@ -81,6 +81,12 @@ policy_loss:
   # RLSD interpolation coefficient
   rlsd_lambda: 0.5
 
+  # RLSD lambda linear warmup steps
+  rlsd_lambda_warmup_steps: 0
+
+  # RLSD lambda linear decay steps after warmup
+  rlsd_lambda_decay_steps: 0
+
   # RLSD token reweight clip range
   rlsd_reweight_clip_range: 0.2
 

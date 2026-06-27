@@ -21,7 +21,9 @@ from verl.trainer.extpi_rlsd.scorer import (
     assert_left_padded_prefix_mask,
     assert_tokenizer_compatible,
 )
+from verl.utils import tensordict_utils as tu
 from verl.utils.torch_functional import masked_mean
+from verl.workers.utils.padding import left_right_2_no_padding, no_padding_2_padding
 
 try:
     from verl.trainer.ppo.ray_trainer import RayPPOTrainer
@@ -302,12 +304,114 @@ def _group_diagnostic_metrics(
 class ExtPIRLSDRayPPOTrainer(RayPPOTrainer):
     """Legacy PPO trainer that injects PI teacher logprobs for RLSD updates."""
 
+    _TEACHER_SNAPSHOT_ADAPTER = "extpi_teacher"
+
     def __init__(self, *args, **kwargs) -> None:
         if _RAY_TRAINER_IMPORT_ERROR is not None:
             raise ModuleNotFoundError(
                 "ExtPIRLSDRayPPOTrainer requires the full verl PPO trainer dependencies"
             ) from _RAY_TRAINER_IMPORT_ERROR
         super().__init__(*args, **kwargs)
+        self._extpi_teacher_last_sync_step: int | None = None
+
+    def _compute_actor_log_prob(
+        self,
+        batch: DataProto,
+        *,
+        no_lora_adapter: bool = False,
+        lora_adapter_name: str | None = None,
+    ) -> DataProto:
+        if no_lora_adapter and lora_adapter_name is not None:
+            raise ValueError("no_lora_adapter and lora_adapter_name are mutually exclusive")
+        batch_td = batch.to_tensordict()
+        batch_td = left_right_2_no_padding(batch_td)
+        rollout_config = self.config.actor_rollout_ref.rollout
+        metadata = {
+            "calculate_entropy": False,
+            "compute_loss": False,
+            "temperature": rollout_config.temperature,
+        }
+        if no_lora_adapter:
+            metadata["no_lora_adapter"] = True
+        if lora_adapter_name is not None:
+            metadata["lora_adapter_name"] = lora_adapter_name
+        tu.assign_non_tensor(batch_td, **metadata)
+        output = self.actor_rollout_wg.compute_log_prob(batch_td)
+        log_probs = tu.get(output, "log_probs")
+        log_probs = no_padding_2_padding(log_probs, batch_td)
+        return DataProto.from_tensordict(tu.get_tensordict({"ref_log_prob": log_probs.float()}))
+
+    def _compute_effective_rlsd_lambda(self, policy_loss: Any) -> float:
+        target_lambda = float(policy_loss.get("rlsd_lambda", 0.5))
+        warmup_steps = int(policy_loss.get("rlsd_lambda_warmup_steps", 0))
+        decay_steps = int(policy_loss.get("rlsd_lambda_decay_steps", 0))
+        if warmup_steps < 0:
+            raise ValueError("actor.policy_loss.rlsd_lambda_warmup_steps must be non-negative")
+        if decay_steps < 0:
+            raise ValueError("actor.policy_loss.rlsd_lambda_decay_steps must be non-negative")
+        step = int(getattr(self, "global_steps", 0))
+        if warmup_steps > 0 and step < warmup_steps:
+            return target_lambda * (step / warmup_steps)
+        if decay_steps > 0 and step >= warmup_steps:
+            decay_progress = (step - warmup_steps) / decay_steps
+            return target_lambda * max(1.0 - decay_progress, 0.0)
+        return target_lambda
+
+    def _maybe_sync_teacher_snapshot(
+        self,
+        *,
+        extpi_config: dict[str, Any],
+        metrics: dict[str, Any],
+    ) -> None:
+        sync_interval = int(extpi_config.get("teacher_sync_interval", 20))
+        if sync_interval <= 0:
+            raise ValueError("extpi_rlsd.teacher_sync_interval must be positive for periodic_snapshot")
+        step = int(getattr(self, "global_steps", 0))
+        last_sync = getattr(self, "_extpi_teacher_last_sync_step", None)
+        should_sync = last_sync is None or (step - int(last_sync)) >= sync_interval
+        if should_sync:
+            self.actor_rollout_wg.sync_extpi_teacher_snapshot(
+                source_adapter="default",
+                target_adapter=self._TEACHER_SNAPSHOT_ADAPTER,
+            )
+            self._extpi_teacher_last_sync_step = step
+        metrics["extpi/teacher_snapshot_synced"] = 1.0 if should_sync else 0.0
+        metrics["extpi/teacher_snapshot_step"] = float(getattr(self, "_extpi_teacher_last_sync_step", -1))
+        metrics["extpi/teacher_sync_interval"] = float(sync_interval)
+
+    def _compute_pi_teacher_log_prob(
+        self,
+        score_batch: DataProto,
+        *,
+        teacher_update_mode: str,
+        extpi_config: dict[str, Any],
+        metrics: dict[str, Any],
+    ) -> DataProto:
+        if teacher_update_mode == "base_no_adapter":
+            if not self.ref_in_actor:
+                raise ValueError(
+                    "teacher_update_mode=base_no_adapter requires a LoRA actor so the base model is in actor"
+                )
+            return self._compute_ref_log_prob(score_batch)
+        if teacher_update_mode == "current_no_grad":
+            return self._compute_actor_log_prob(score_batch)
+        if teacher_update_mode == "periodic_snapshot":
+            if not self.ref_in_actor:
+                raise ValueError("teacher_update_mode=periodic_snapshot requires a LoRA actor")
+            if not bool(self.config.actor_rollout_ref.model.get("extpi_teacher_adapter", False)):
+                raise ValueError(
+                    "teacher_update_mode=periodic_snapshot requires actor_rollout_ref.model.extpi_teacher_adapter=True"
+                )
+            self._maybe_sync_teacher_snapshot(extpi_config=extpi_config, metrics=metrics)
+            return self._compute_actor_log_prob(
+                score_batch,
+                lora_adapter_name=self._TEACHER_SNAPSHOT_ADAPTER,
+            )
+        raise ValueError(
+            "extpi_rlsd.teacher_update_mode must be one of "
+            "base_no_adapter, current_no_grad, periodic_snapshot; "
+            f"got {teacher_update_mode!r}"
+        )
 
     def _add_training_diagnostics(self, batch: DataProto, metrics: dict[str, Any]) -> None:
         if "response_mask" in batch.batch:
@@ -469,11 +573,11 @@ class ExtPIRLSDRayPPOTrainer(RayPPOTrainer):
             )
             return batch
 
-        teacher_update_mode = extpi_config.get("teacher_update_mode", "base_no_adapter")
-        if teacher_update_mode != "base_no_adapter":
-            raise NotImplementedError("ExtPI-RLSD MVP only supports teacher_update_mode=base_no_adapter")
-        if not self.ref_in_actor:
-            raise ValueError("teacher_update_mode=base_no_adapter requires a LoRA actor so the base model is in actor")
+        effective_lambda = self._compute_effective_rlsd_lambda(policy_loss)
+        batch.meta_info["rlsd_effective_lambda"] = effective_lambda
+        metrics["rlsd/effective_lambda"] = effective_lambda
+
+        teacher_update_mode = str(extpi_config.get("teacher_update_mode", "base_no_adapter")).lower()
 
         max_prompt_length = int(extpi_config.get("teacher_max_prompt_length", self.config.data.max_prompt_length))
         allow_truncation = bool(extpi_config.get("allow_teacher_prompt_truncation", True))
@@ -485,7 +589,12 @@ class ExtPIRLSDRayPPOTrainer(RayPPOTrainer):
             allow_prompt_truncation=allow_truncation,
             teacher_thinking=teacher_thinking,
         )
-        teacher_ref = self._compute_ref_log_prob(build.batch)
+        teacher_ref = self._compute_pi_teacher_log_prob(
+            build.batch,
+            teacher_update_mode=teacher_update_mode,
+            extpi_config=extpi_config,
+            metrics=metrics,
+        )
         teacher_log_probs = teacher_ref.batch["ref_log_prob"].detach().to(
             device=batch.batch["responses"].device,
             dtype=batch.batch["old_log_probs"].dtype,

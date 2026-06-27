@@ -383,6 +383,9 @@ class TrainingWorker(Worker, DistProfilerExtension):
         compute_loss = tu.get(data, key="compute_loss", default=True)
         disable_auto_offload = tu.get(data, key="disable_auto_offload", default=False)
         no_lora_adapter = tu.pop(data, key="no_lora_adapter", default=False)
+        lora_adapter_name = tu.pop(data, key="lora_adapter_name", default=None)
+        if no_lora_adapter and lora_adapter_name is not None:
+            raise ValueError("no_lora_adapter and lora_adapter_name are mutually exclusive")
         images_seqlens = tu.get(data, key="images_seqlens", default=None)
 
         default_keys = dict(
@@ -404,7 +407,12 @@ class TrainingWorker(Worker, DistProfilerExtension):
             self.engine.eval_mode(disable_auto_offload=disable_auto_offload),
             Timer(name="eval_batch", logger=None) as timer,
         ):
-            adapter_ctx = self.engine.disable_adapter() if no_lora_adapter else nullcontext()
+            if no_lora_adapter:
+                adapter_ctx = self.engine.disable_adapter()
+            elif lora_adapter_name is not None:
+                adapter_ctx = self.engine.adapter_context(str(lora_adapter_name))
+            else:
+                adapter_ctx = nullcontext()
             with adapter_ctx:
                 output = self.engine.infer_batch(data, loss_function=loss_function)
         delta_time = timer.last
@@ -429,6 +437,10 @@ class TrainingWorker(Worker, DistProfilerExtension):
     @register(dispatch_mode=Dispatch.ONE_TO_ALL)
     def load_checkpoint(self, local_path, hdfs_path=None, del_local_after_load=False):
         return self.engine.load_checkpoint(local_path, hdfs_path, del_local_after_load)
+
+    @register(dispatch_mode=Dispatch.ONE_TO_ALL)
+    def sync_extpi_teacher_snapshot(self, source_adapter="default", target_adapter="extpi_teacher"):
+        return self.engine.sync_lora_adapter_snapshot(source_adapter=source_adapter, target_adapter=target_adapter)
 
 
 class ActorRolloutRefWorker(Worker, DistProfilerExtension):
@@ -665,6 +677,14 @@ class ActorRolloutRefWorker(Worker, DistProfilerExtension):
     def save_checkpoint(self, local_path, hdfs_path=None, global_step=0, max_ckpt_to_keep=None):
         assert "actor" in self.role, "save_checkpoint only support actor role"
         self.actor.save_checkpoint(local_path, hdfs_path, global_step, max_ckpt_to_keep)
+
+    @register(dispatch_mode=Dispatch.ONE_TO_ALL)
+    def sync_extpi_teacher_snapshot(self, source_adapter="default", target_adapter="extpi_teacher"):
+        assert "actor" in self.role, "sync_extpi_teacher_snapshot only support actor role"
+        return self.actor.sync_extpi_teacher_snapshot(
+            source_adapter=source_adapter,
+            target_adapter=target_adapter,
+        )
 
     @register(dispatch_mode=Dispatch.ONE_TO_ALL, blocking=False)
     async def update_weights(self, global_steps: int = None, mode: str = "auto"):

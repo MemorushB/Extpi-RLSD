@@ -4,6 +4,7 @@ import torch
 from tensordict import TensorDict
 
 from verl.trainer.extpi_rlsd.rlsd import RLSDConfig, compute_opd_pg_advantages, compute_rlsd_advantages
+from verl.utils import tensordict_utils as tu
 from verl.workers.utils import losses as worker_losses
 
 
@@ -113,3 +114,23 @@ def test_rlsd_actor_loss_can_use_old_logprob_when_configured(monkeypatch):
     worker_losses.ppo_loss(_ppo_config(delta_source="old"), {"log_probs": torch.tensor([[3.0, 4.0]])}, _ppo_data())
 
     assert torch.allclose(captured["student_log_probs"], torch.tensor([[0.1, 0.2]]))
+
+
+def test_rlsd_actor_loss_uses_effective_lambda_from_batch_meta(monkeypatch):
+    captured = {}
+
+    def fake_compute_rlsd_advantages(*, teacher_log_probs, student_log_probs, advantages, response_mask, config):
+        del teacher_log_probs, student_log_probs, response_mask
+        captured["lambda"] = config.lam
+        return advantages, {"rlsd/effective_lambda": config.lam}
+
+    monkeypatch.setattr(worker_losses, "no_padding_2_padding", lambda tensor, data: tensor)
+    monkeypatch.setattr(worker_losses, "compute_rlsd_advantages", fake_compute_rlsd_advantages)
+    monkeypatch.setattr(worker_losses, "get_policy_loss_fn", lambda loss_mode: lambda **kwargs: (torch.tensor(0.0), {}))
+
+    data = _ppo_data()
+    tu.assign_non_tensor(data, rlsd_effective_lambda=0.125)
+    _, metrics = worker_losses.ppo_loss(_ppo_config(), {"log_probs": torch.tensor([[3.0, 4.0]])}, data)
+
+    assert captured["lambda"] == 0.125
+    assert metrics["rlsd/effective_lambda"].aggregate() == 0.125

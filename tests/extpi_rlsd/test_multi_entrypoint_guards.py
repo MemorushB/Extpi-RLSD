@@ -36,6 +36,8 @@ def test_actor_yaml_has_extpi_policy_loss_keys():
     for key in (
         "rlsd_enabled",
         "rlsd_lambda",
+        "rlsd_lambda_warmup_steps",
+        "rlsd_lambda_decay_steps",
         "rlsd_reweight_clip_range",
         "rlsd_negative_only",
         "rlsd_delta_student_logp_source",
@@ -79,10 +81,23 @@ def test_env_multi_has_no_gpu6_guard_and_unsets_single_card_ray_override():
     assert "unset RAY_EXPERIMENTAL_NOSET_CUDA_VISIBLE_DEVICES" in text
 
 
-def test_extpi_multi_keeps_base_no_adapter_guard():
+def test_extpi_multi_allows_configured_teacher_modes():
     text = _read_script("run_extpi_rlsd_multi.sh")
     assert 'TEACHER_UPDATE_MODE="${TEACHER_UPDATE_MODE:-base_no_adapter}"' in text
-    assert 'Multi-GPU ExtPI MVP currently supports base_no_adapter only.' in text
+    assert "current_no_grad" in text
+    assert "periodic_snapshot" in text
+    assert 'actor_rollout_ref.model.extpi_teacher_adapter="${EXTPI_TEACHER_ADAPTER}"' in text
+
+
+def test_extpi_scripts_expose_teacher_modes_and_lambda_schedule():
+    for script_name in ("run_extpi_rlsd.sh", "run_extpi_rlsd_multi.sh"):
+        text = _read_script(script_name)
+        assert 'RLSD_LAMBDA_WARMUP_STEPS="${RLSD_LAMBDA_WARMUP_STEPS:-0}"' in text
+        assert 'RLSD_LAMBDA_DECAY_STEPS="${RLSD_LAMBDA_DECAY_STEPS:-0}"' in text
+        assert 'TEACHER_SYNC_INTERVAL="${TEACHER_SYNC_INTERVAL:-20}"' in text
+        assert 'actor_rollout_ref.actor.policy_loss.rlsd_lambda_warmup_steps="${RLSD_LAMBDA_WARMUP_STEPS}"' in text
+        assert 'actor_rollout_ref.actor.policy_loss.rlsd_lambda_decay_steps="${RLSD_LAMBDA_DECAY_STEPS}"' in text
+        assert '+extpi_rlsd.teacher_sync_interval="${TEACHER_SYNC_INTERVAL}"' in text
 
 
 def test_env_multi_rejects_single_gpu():

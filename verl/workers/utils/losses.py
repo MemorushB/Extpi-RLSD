@@ -101,6 +101,11 @@ def ppo_loss(config: ActorConfig, model_output, data: TensorDict, dp_group=None)
         fields.append("rollout_is_weights")
     if "ref_log_prob" in data:
         fields.append("ref_log_prob")
+    rlsd_effective_lambda = tu.get_non_tensor_data(
+        data=data,
+        key="rlsd_effective_lambda",
+        default=config.policy_loss.get("rlsd_lambda", 0.5),
+    )
     data = data.select(*fields).to_padded_tensor()
 
     response_mask = data["response_mask"].to(bool)
@@ -124,7 +129,7 @@ def ppo_loss(config: ActorConfig, model_output, data: TensorDict, dp_group=None)
             advantages=advantages,
             response_mask=response_mask,
             config=RLSDConfig(
-                lam=float(config.policy_loss.get("rlsd_lambda", 0.5)),
+                lam=float(rlsd_effective_lambda),
                 clip_range=float(config.policy_loss.get("rlsd_reweight_clip_range", 0.2)),
                 negative_only=bool(config.policy_loss.get("rlsd_negative_only", False)),
             ),
