@@ -138,6 +138,7 @@ def test_env_multi_unsets_single_card_ray_override():
 
 def test_env_single_card_enables_wandb_logger_by_default(tmp_path):
     env = os.environ.copy()
+    env.pop("WANDB_MODE", None)
     env.update(
         {
             "CUDA_VISIBLE_DEVICES": "6",
@@ -148,15 +149,34 @@ def test_env_single_card_enables_wandb_logger_by_default(tmp_path):
     )
     cmd = (
         f"source {SCRIPT_DIR / '_env.sh'}; "
-        'printf "%s:%s" "$TRAINER_LOGGER" "$WANDB_DIR"'
+        'printf "%s:%s:%s" "$TRAINER_LOGGER" "$WANDB_DIR" "$WANDB_MODE"'
     )
     result = subprocess.run(["bash", "-lc", cmd], env=env, capture_output=True, text=True, check=False)
 
     assert result.returncode == 0
-    logger_value, wandb_dir = result.stdout.split(":", 1)
+    logger_value, wandb_dir, wandb_mode = result.stdout.split(":", 2)
     assert logger_value == '["console","wandb"]'
     assert wandb_dir == str(tmp_path / "outputs" / "wandb")
+    assert wandb_mode == "online"
     assert (tmp_path / "outputs" / "wandb").is_dir()
+
+
+def test_env_single_card_preserves_explicit_wandb_mode(tmp_path):
+    env = os.environ.copy()
+    env.update(
+        {
+            "CUDA_VISIBLE_DEVICES": "6",
+            "NPROC_PER_NODE": "1",
+            "NGPUS_PER_NODE": "1",
+            "EXTPI_DATA_ROOT": str(tmp_path),
+            "WANDB_MODE": "offline",
+        }
+    )
+    cmd = f"source {SCRIPT_DIR / '_env.sh'}; printf \"%s\" \"$WANDB_MODE\""
+    result = subprocess.run(["bash", "-lc", cmd], env=env, capture_output=True, text=True, check=False)
+
+    assert result.returncode == 0
+    assert result.stdout == "offline"
 
 
 def test_env_single_card_can_disable_default_wandb(tmp_path):
@@ -176,6 +196,31 @@ def test_env_single_card_can_disable_default_wandb(tmp_path):
     assert result.returncode == 0
     assert result.stdout == '["console"]'
     assert not (tmp_path / "outputs" / "wandb").exists()
+
+
+def test_env_multi_enables_wandb_logger_by_default(tmp_path):
+    env = os.environ.copy()
+    env.pop("WANDB_MODE", None)
+    env.update(
+        {
+            "CUDA_VISIBLE_DEVICES": "0,1",
+            "NPROC_PER_NODE": "2",
+            "NGPUS_PER_NODE": "2",
+            "EXTPI_DATA_ROOT": str(tmp_path),
+        }
+    )
+    cmd = (
+        f"source {SCRIPT_DIR / '_env_multi.sh'}; "
+        'printf "%s:%s:%s" "$TRAINER_LOGGER" "$WANDB_DIR" "$WANDB_MODE"'
+    )
+    result = subprocess.run(["bash", "-lc", cmd], env=env, capture_output=True, text=True, check=False)
+
+    assert result.returncode == 0
+    logger_value, wandb_dir, wandb_mode = result.stdout.split(":", 2)
+    assert logger_value == '["console","wandb"]'
+    assert wandb_dir == str(tmp_path / "outputs" / "wandb")
+    assert wandb_mode == "online"
+    assert (tmp_path / "outputs" / "wandb").is_dir()
 
 
 def test_env_single_card_unsets_cuda_allocator_by_default(tmp_path):

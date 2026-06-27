@@ -188,17 +188,17 @@ defaults to OPSD-compatible prompts, `Avg@12`, fixed seeds `0..11`,
 
 ## WandB Logging
 
-Training scripts default to console + WandB logging:
+Training scripts default to console + WandB logging with online syncing:
 
 ```bash
 TRAINER_LOGGER='["console","wandb"]'
+WANDB_MODE=online
 ```
 
 Use any single-card or multi-GPU training entrypoint directly:
 
 ```bash
 WANDB_ENTITY=... \
-WANDB_MODE=online \
 TOTAL_TRAINING_STEPS=5 \
 bash recipes/extpi_rlsd/scripts/run_extpi_rlsd.sh
 ```

@@ -169,11 +169,11 @@ defaults to OPSD-compatible prompts, `Avg@12`, fixed seeds `0..11`,
 ## WandB Logging
 
 All training entrypoints use `TRAINER_LOGGER`, which defaults to
-`["console","wandb"]`.
+`["console","wandb"]`, and set `WANDB_MODE=online` when WandB is enabled and no
+mode was provided by the caller.
 
 ```bash
 WANDB_ENTITY=... \
-WANDB_MODE=online \
 TOTAL_TRAINING_STEPS=5 \
 bash recipes/extpi_rlsd/scripts/run_extpi_rlsd.sh
 ```

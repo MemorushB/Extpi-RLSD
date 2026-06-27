@@ -939,6 +939,44 @@ class FSDPEngine(BaseEngine):
                 module.set_adapter(previous)
 
     @staticmethod
+    def _copy_lora_tensor(target: torch.Tensor, source: torch.Tensor) -> None:
+        source_value = source.detach()
+        target_value = target.detach()
+        try:
+            from torch.distributed.tensor import DTensor
+        except ImportError:  # pragma: no cover - older torch without DTensor
+            DTensor = ()  # type: ignore[assignment]
+
+        if DTensor and isinstance(target_value, DTensor) and not isinstance(source_value, DTensor):
+            source_value = DTensor.from_local(
+                source_value.to(device=target_value.device, dtype=target_value.dtype),
+                device_mesh=target_value.device_mesh,
+                placements=target_value.placements,
+                run_check=False,
+            )
+        elif not (DTensor and isinstance(source_value, DTensor)):
+            source_value = source_value.to(device=target_value.device, dtype=target_value.dtype)
+        target.copy_(source_value)
+
+    @staticmethod
+    def _copy_lora_module_weights(source: torch.nn.Module, target: torch.nn.Module) -> int:
+        source_params = dict(source.named_parameters(recurse=True))
+        copied = 0
+        for name, target_param in target.named_parameters(recurse=True):
+            if name not in source_params:
+                raise ValueError(f"Missing LoRA source parameter {name!r}")
+            FSDPEngine._copy_lora_tensor(target_param, source_params[name])
+            copied += target_param.numel()
+
+        source_buffers = dict(source.named_buffers(recurse=True))
+        for name, target_buffer in target.named_buffers(recurse=True):
+            if name not in source_buffers:
+                raise ValueError(f"Missing LoRA source buffer {name!r}")
+            FSDPEngine._copy_lora_tensor(target_buffer, source_buffers[name])
+            copied += target_buffer.numel()
+        return copied
+
+    @staticmethod
     def _copy_lora_adapter_weights(module, source_adapter: str, target_adapter: str) -> int:
         from peft.tuners.lora import LoraLayer
 
@@ -953,13 +991,12 @@ class FSDPEngine(BaseEngine):
                 source = mapping[source_adapter]
                 target = mapping[target_adapter]
                 if isinstance(source, torch.nn.Parameter):
-                    target.data.copy_(source.data)
+                    FSDPEngine._copy_lora_tensor(target, source)
                     copied += target.numel()
-                elif hasattr(source, "state_dict") and hasattr(target, "load_state_dict"):
-                    target.load_state_dict(source.state_dict())
-                    copied += sum(param.numel() for param in target.parameters())
+                elif isinstance(source, torch.nn.Module) and isinstance(target, torch.nn.Module):
+                    copied += FSDPEngine._copy_lora_module_weights(source, target)
                 elif torch.is_tensor(source):
-                    target.data.copy_(source.data)
+                    FSDPEngine._copy_lora_tensor(target, source)
                     copied += target.numel()
             if hasattr(lora_layer, "scaling") and source_adapter in lora_layer.scaling:
                 lora_layer.scaling[target_adapter] = lora_layer.scaling[source_adapter]

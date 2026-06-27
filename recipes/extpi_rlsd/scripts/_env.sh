@@ -39,6 +39,7 @@ if [ -z "${TRAINER_LOGGER:-}" ]; then
   esac
 fi
 if [[ "${TRAINER_LOGGER}" == *wandb* ]]; then
+  export WANDB_MODE="${WANDB_MODE:-online}"
   export WANDB_DIR="${WANDB_DIR:-${EXTPI_DATA_ROOT}/outputs/wandb}"
   mkdir -p "${WANDB_DIR}"
 fi
