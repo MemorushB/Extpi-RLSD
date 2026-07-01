@@ -58,12 +58,12 @@ def _token_ids_from_template(tokenizer: Any, messages: list[dict[str, Any]], ena
     return [int(token_id) for token_id in output]
 
 
-def _generation_prompt_len(tokenizer: Any) -> int:
+def _prompt_prefix_lengths(tokenizer: Any) -> tuple[int, int]:
     try:
-        _, generation_prompt = extract_system_prompt_and_generation(tokenizer)
-        return len(generation_prompt)
+        system_prompt, generation_prompt = extract_system_prompt_and_generation(tokenizer)
+        return len(system_prompt), len(generation_prompt)
     except Exception:
-        return 0
+        return 0, 0
 
 
 def _message_content(message: dict[str, Any]) -> str:
@@ -112,7 +112,7 @@ def inspect_dataframe(
     if max_rows is not None:
         dataframe = dataframe.head(max_rows)
 
-    generation_prompt_len = _generation_prompt_len(tokenizer)
+    system_prompt_len, generation_prompt_len = _prompt_prefix_lengths(tokenizer)
     total_lengths: list[int] = []
     assistant_loss_lengths: list[int] = []
     overlong_ids: list[str] = []
@@ -137,21 +137,25 @@ def inspect_dataframe(
         total_length = 0
         assistant_loss_length = 0
         assistant_has_content = False
-        for message in messages:
+        for message_index, message in enumerate(messages):
             if not isinstance(message, dict):
                 invalid_rows.append(row_id)
                 continue
             content = _message_content(message)
+            role = message.get("role")
             if message.get("role") == "user":
                 lowered = content.lower()
                 if any(pattern in lowered for pattern in PI_LEAK_PATTERNS):
                     pi_leak_ids.append(row_id)
-            if message.get("role") == "assistant" and content.strip():
+            if role == "assistant" and content.strip():
                 assistant_has_content = True
             token_ids = _token_ids_from_template(tokenizer, [message], enable_thinking)
-            total_length += len(token_ids)
-            if message.get("role") == "assistant":
-                assistant_loss_length += max(0, len(token_ids) - generation_prompt_len)
+            effective_length = len(token_ids)
+            if message_index != 0 and role != "system":
+                effective_length = max(0, effective_length - system_prompt_len)
+            total_length += effective_length
+            if role == "assistant":
+                assistant_loss_length += max(0, effective_length - generation_prompt_len)
 
         if not assistant_has_content or assistant_loss_length <= 0:
             invalid_rows.append(row_id)

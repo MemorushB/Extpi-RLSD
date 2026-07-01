@@ -96,6 +96,15 @@ TOTAL_TRAINING_STEPS=5 bash recipes/extpi_rlsd/scripts/run_extpi_rlsd.sh
 The dedicated entry point is `verl.trainer.extpi_rlsd.main_extpi_rlsd`; it uses
 the legacy PPO trainer because the MVP hook is implemented there.
 
+Closed/off-policy SFT smoke:
+
+```bash
+SFT_EPOCHS=1 bash recipes/extpi_rlsd/scripts/run_closed_sft.sh
+```
+
+Closed SFT runs parquet preflight by default (`SFT_PREFLIGHT=1`) and uses
+`MAX_SEQUENCE_LENGTH=8192` unless overridden.
+
 ## Multi-GPU Commands
 
 GRPO and ExtPI-RLSD scale actor/rollout workers across the visible GPUs:
@@ -106,6 +115,12 @@ NGPUS_PER_NODE=4 \
 SCALE_MODE=fixed \
 TOTAL_TRAINING_STEPS=5 \
 bash recipes/extpi_rlsd/scripts/run_extpi_rlsd_multi.sh
+
+CUDA_VISIBLE_DEVICES=0,1,2,3 \
+NGPUS_PER_NODE=4 \
+SCALE_MODE=fixed \
+SFT_EPOCHS=1 \
+bash recipes/extpi_rlsd/scripts/run_closed_sft_multi.sh
 ```
 
 Direct OPD uses different backends by entrypoint:
@@ -125,6 +140,8 @@ bash recipes/extpi_rlsd/scripts/run_opd_pg_multi_teacher_pool.sh
 
 Keep `SCALE_MODE=fixed` for single-card comparability. Use `SCALE_MODE=linear`
 only for throughput experiments after fixed-scale smoke passes.
+For closed SFT, `SCALE_MODE=fixed` defaults to global batch 8, and the multi-GPU
+script checks that `SFT_TRAIN_BATCH_SIZE` is divisible by `NGPUS_PER_NODE * NNODES`.
 
 Run the local contract tests without starting training:
 

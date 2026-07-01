@@ -110,6 +110,7 @@ TOTAL_TRAINING_STEPS=5 bash recipes/extpi_rlsd/scripts/run_grpo.sh
 TOTAL_TRAINING_STEPS=5 bash recipes/extpi_rlsd/scripts/run_opd_pg.sh
 TOTAL_TRAINING_STEPS=5 bash recipes/extpi_rlsd/scripts/run_extpi_rlsd.sh
 TOTAL_TRAINING_STEPS=5 bash recipes/extpi_rlsd/scripts/run_extpi_rlsd_shuffled.sh
+SFT_EPOCHS=1 bash recipes/extpi_rlsd/scripts/run_closed_sft.sh
 ```
 
 `run_opd_pg.sh` is the Baseline 2 entrypoint. It uses a single-card
@@ -118,6 +119,10 @@ resource pool, and performs a tokenizer compatibility preflight before
 training. `run_extpi_rlsd.sh` uses
 `verl.trainer.extpi_rlsd.main_extpi_rlsd`, which runs the legacy PPO trainer
 hook that materializes `teacher_pi_log_probs`.
+
+`run_closed_sft.sh` is the off-policy SFT baseline entrypoint. It runs parquet
+preflight by default (`SFT_PREFLIGHT=1`) and defaults to
+`MAX_SEQUENCE_LENGTH=8192`.
 
 ## Multi-GPU Entrypoints
 
@@ -131,6 +136,12 @@ TOTAL_TRAINING_STEPS=5 \
 bash recipes/extpi_rlsd/scripts/run_extpi_rlsd_multi.sh
 
 CUDA_VISIBLE_DEVICES=0,1,2,3 \
+NGPUS_PER_NODE=4 \
+SCALE_MODE=fixed \
+SFT_EPOCHS=1 \
+bash recipes/extpi_rlsd/scripts/run_closed_sft_multi.sh
+
+CUDA_VISIBLE_DEVICES=0,1,2,3 \
 NGPUS_PER_NODE=3 \
 TEACHER_NGPUS_PER_NODE=1 \
 TOTAL_TRAINING_STEPS=5 \
@@ -140,6 +151,8 @@ bash recipes/extpi_rlsd/scripts/run_opd_pg_multi_teacher_pool.sh
 `SCALE_MODE=fixed` keeps the research batch at 8 prompts/update for
 single-card comparability. `SCALE_MODE=linear` sets the default train batch to
 `8 * NGPUS_PER_NODE * NNODES` for throughput experiments.
+For closed SFT, `SCALE_MODE=fixed` likewise defaults to global batch 8, and
+`run_closed_sft_multi.sh` requires that batch to divide the world size.
 
 OPD backend choice is deliberate:
 

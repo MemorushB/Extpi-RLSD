@@ -31,6 +31,11 @@ else
   exit 1
 fi
 SFT_TRAIN_BATCH_SIZE="${SFT_TRAIN_BATCH_SIZE:-${DEFAULT_SFT_TRAIN_BATCH_SIZE}}"
+WORLD_SIZE=$((NGPUS_PER_NODE * NNODES))
+if [ $((SFT_TRAIN_BATCH_SIZE % WORLD_SIZE)) -ne 0 ]; then
+  echo "SFT_TRAIN_BATCH_SIZE must be divisible by WORLD_SIZE=${WORLD_SIZE}; got ${SFT_TRAIN_BATCH_SIZE}" >&2
+  exit 1
+fi
 
 val_args=(data.val_files=null)
 if [ -n "${VAL_FILE}" ]; then

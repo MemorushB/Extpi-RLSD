@@ -31,6 +31,8 @@ def test_multi_closed_sft_entrypoint_uses_multi_env_and_torchrun():
     assert 'trainer.nnodes="${NNODES}"' in text
     assert 'model.path="${MODEL_PATH}"' in text
     assert "model.partial_pretrain" not in text
+    assert "WORLD_SIZE=$((NGPUS_PER_NODE * NNODES))" in text
+    assert "SFT_TRAIN_BATCH_SIZE must be divisible by WORLD_SIZE" in text
 
 
 def test_closed_sft_entrypoints_run_parquet_preflight():

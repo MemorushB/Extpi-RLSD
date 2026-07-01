@@ -94,6 +94,14 @@ change and explain why**.
   [`docs/contributing/editing-agent-instructions.md`](docs/contributing/editing-agent-instructions.md)
   — Rules for modifying AGENTS.md or any domain-specific guide it references.
 
-## Acknowledgements
+## Experiements Naming Guidelines
+Use the following naming convention for experiments:
 
-Adapted from the [vLLM project](https://github.com/vllm-project/vllm)'s [`AGENTS.md`](https://github.com/vllm-project/vllm/blob/main/AGENTS.md).
+[Method]-[Teacher]-[Student]-[Dataset]-[Recipe]-[Seed]
+
+For example：
+
+GRPO-NONE-q17-ot800-base-s1
+RLSD-NEMO-q17-ot800-negonly-s1
+OPSD-SELF-q4-frontier-fullvocab-s1
+SFT-QW-q17-ot800-offpolicy-s1
