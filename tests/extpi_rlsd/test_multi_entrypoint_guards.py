@@ -24,6 +24,7 @@ def test_recipe_entrypoints_use_configurable_trainer_logger():
         "run_grpo_multi.sh",
         "run_extpi_rlsd_multi.sh",
         "run_closed_sft.sh",
+        "run_closed_sft_multi.sh",
     )
     for script_name in script_names:
         text = _read_script(script_name)

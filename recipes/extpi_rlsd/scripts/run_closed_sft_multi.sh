@@ -1,15 +1,15 @@
 #!/usr/bin/env bash
 set -xeuo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-source "${SCRIPT_DIR}/_env.sh"
+source "${SCRIPT_DIR}/_env_multi.sh"
 
 TRAIN_FILE="${TRAIN_FILE:-${EXTPI_DATA_ROOT}/datasets/closed_sft/train.parquet}"
 VAL_FILE="${VAL_FILE:-}"
 MODEL_PATH="${MODEL_PATH:-Qwen/Qwen3-1.7B}"
 PROJECT_NAME="${PROJECT_NAME:-extpi_rlsd}"
-EXPERIMENT_NAME="${EXPERIMENT_NAME:-closed_sft_qwen3_1p7b_lora}"
+EXPERIMENT_NAME="${EXPERIMENT_NAME:-closed_sft_qwen3_1p7b_lora_multi}"
 SPLIT_MANIFEST="${SPLIT_MANIFEST:-${EXTPI_DATA_ROOT}/datasets/closed_sft/manifest.json}"
-SFT_TRAIN_BATCH_SIZE="${SFT_TRAIN_BATCH_SIZE:-8}"
+SCALE_MODE="${SCALE_MODE:-fixed}"
 SFT_MICRO_BATCH_SIZE_PER_GPU="${SFT_MICRO_BATCH_SIZE_PER_GPU:-${SFT_MICRO_BATCH_SIZE:-1}}"
 SFT_EPOCHS="${SFT_EPOCHS:-1}"
 SFT_LR="${SFT_LR:-5e-6}"
@@ -21,6 +21,16 @@ SAVE_FREQ="${SAVE_FREQ:-25}"
 TEST_FREQ="${TEST_FREQ:--1}"
 RESUME_MODE="${RESUME_MODE:-disable}"
 SFT_PREFLIGHT="${SFT_PREFLIGHT:-1}"
+
+if [ "${SCALE_MODE}" = "linear" ]; then
+  DEFAULT_SFT_TRAIN_BATCH_SIZE=$((8 * NGPUS_PER_NODE * NNODES))
+elif [ "${SCALE_MODE}" = "fixed" ]; then
+  DEFAULT_SFT_TRAIN_BATCH_SIZE=8
+else
+  echo "SCALE_MODE must be fixed or linear; got ${SCALE_MODE}" >&2
+  exit 1
+fi
+SFT_TRAIN_BATCH_SIZE="${SFT_TRAIN_BATCH_SIZE:-${DEFAULT_SFT_TRAIN_BATCH_SIZE}}"
 
 val_args=(data.val_files=null)
 if [ -n "${VAL_FILE}" ]; then
@@ -42,16 +52,18 @@ write_extpi_run_manifest "${EXPERIMENT_NAME}" \
   --config_kv "model_path=${MODEL_PATH}" \
   --config_kv "train_file=${TRAIN_FILE}" \
   --config_kv "val_file=${VAL_FILE}" \
+  --config_kv "scale_mode=${SCALE_MODE}" \
   --config_kv "sft_train_batch_size=${SFT_TRAIN_BATCH_SIZE}" \
   --config_kv "micro_batch_size_per_gpu=${SFT_MICRO_BATCH_SIZE_PER_GPU}" \
   --config_kv "sft_epochs=${SFT_EPOCHS}" \
   --config_kv "max_sequence_length=${MAX_SEQUENCE_LENGTH}" \
   --config_kv "lora_rank=${SFT_LORA_RANK}" \
-  --config_kv "lora_alpha=${SFT_LORA_ALPHA}"
+  --config_kv "lora_alpha=${SFT_LORA_ALPHA}" \
+  --config_kv "multi_gpu=true"
 
 torchrun --standalone \
-  --nnodes="${NNODES:-1}" \
-  --nproc_per_node="${NPROC_PER_NODE:-1}" \
+  --nnodes="${NNODES}" \
+  --nproc_per_node="${NPROC_PER_NODE}" \
   -m verl.trainer.sft_trainer \
   data.train_files="${TRAIN_FILE}" \
   "${val_args[@]}" \
@@ -73,7 +85,7 @@ torchrun --standalone \
   trainer.project_name="${PROJECT_NAME}" \
   trainer.experiment_name="${EXPERIMENT_NAME}" \
   trainer.n_gpus_per_node="${NGPUS_PER_NODE}" \
-  trainer.nnodes="${NNODES:-1}" \
+  trainer.nnodes="${NNODES}" \
   trainer.save_freq="${SAVE_FREQ}" \
   trainer.test_freq="${TEST_FREQ}" \
   trainer.resume_mode="${RESUME_MODE}" \

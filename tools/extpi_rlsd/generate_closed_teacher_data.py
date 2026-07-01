@@ -26,6 +26,9 @@ def main() -> None:
     parser.add_argument("--max_attempts", type=int, default=4)
     parser.add_argument("--sleep", type=float, default=1.0)
     parser.add_argument("--max_rows", type=int, default=None)
+    parser.add_argument("--max_tokens", type=int, default=8192)
+    parser.add_argument("--temperature", type=float, default=0.6)
+    parser.add_argument("--top_p", type=float, default=0.95)
     args = parser.parse_args()
 
     base_url = os.environ.get("CLOSED_TEACHER_BASE_URL")
@@ -44,16 +47,27 @@ def main() -> None:
     if args.max_rows is not None:
         rows = rows[: args.max_rows]
     updated = []
+    max_tokens_supported = True
     for row in rows:
         attempts = []
         selected = None
         for attempt_idx in range(args.max_attempts):
-            response = client.chat.completions.create(
-                model=model,
-                messages=[{"role": "user", "content": PROMPT.format(problem=row["problem"])}],
-                temperature=0.6,
-                top_p=0.95,
-            )
+            request_kwargs = {
+                "model": model,
+                "messages": [{"role": "user", "content": PROMPT.format(problem=row["problem"])}],
+                "temperature": args.temperature,
+                "top_p": args.top_p,
+            }
+            if max_tokens_supported:
+                request_kwargs["max_tokens"] = args.max_tokens
+            try:
+                response = client.chat.completions.create(**request_kwargs)
+            except TypeError:
+                if "max_tokens" not in request_kwargs:
+                    raise
+                max_tokens_supported = False
+                request_kwargs.pop("max_tokens")
+                response = client.chat.completions.create(**request_kwargs)
             text = response.choices[0].message.content or ""
             boxed = extract_boxed_answer(text)
             ok = verify_answer(boxed, row["gold_answer"])
@@ -79,6 +93,12 @@ def main() -> None:
             "base_url": base_url,
             "model": model,
             "created_at_utc": datetime.now(timezone.utc).isoformat(),
+            "generation_config": {
+                "max_tokens": args.max_tokens,
+                "max_tokens_supported": max_tokens_supported,
+                "temperature": args.temperature,
+                "top_p": args.top_p,
+            },
             "attempts": attempts,
         }
         updated.append(new_row)
