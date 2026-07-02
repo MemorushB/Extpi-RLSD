@@ -55,6 +55,9 @@ bash recipes/extpi_rlsd/scripts/01b_generate_recipient_uplift_completions.sh
 bash recipes/extpi_rlsd/scripts/03_build_frontier.sh
 ```
 
+ExtPI/UPOD defaults to `PI_TRACE_FIELD=qwen32b_pi_trace`. Set
+`PI_TRACE_FIELD=qwen8b_pi_trace` only for legacy Qwen3-8B trace data.
+
 Set `ALLOW_MISSING_EVAL_CONTAMINATION=1` only for local development runs that
 intentionally skip eval contamination filtering.
 
@@ -104,6 +107,19 @@ SFT_EPOCHS=1 bash recipes/extpi_rlsd/scripts/run_closed_sft.sh
 
 Closed SFT runs parquet preflight by default (`SFT_PREFLIGHT=1`) and uses
 `MAX_SEQUENCE_LENGTH=8192` unless overridden.
+
+## Hyperparameter Matrix
+
+Run one UPOD tuning job from `experiments/extpi_rlsd/hparam_matrix.csv`:
+
+```bash
+RUN_ID=R1-01 bash recipes/extpi_rlsd/scripts/launch_hparam_matrix.sh
+```
+
+The launcher uses gpu6 by default, enables console + WandB + file logging, runs
+matched-dev proxy eval only, and writes summaries under
+`${EXTPI_DATA_ROOT}/outputs/hparams/`. Use `HPARAM_ENTRYPOINT=multi` only when
+multiple GPUs are explicitly allocated.
 
 ## Multi-GPU Commands
 

@@ -84,8 +84,10 @@ def _ppo_data():
 def test_rlsd_actor_loss_uses_current_logprob_by_default(monkeypatch):
     captured = {}
 
-    def fake_compute_rlsd_advantages(*, teacher_log_probs, student_log_probs, advantages, response_mask, config):
-        del teacher_log_probs, response_mask, config
+    def fake_compute_rlsd_advantages(
+        *, teacher_log_probs, student_log_probs, advantages, response_mask, rlsd_token_mask, config
+    ):
+        del teacher_log_probs, response_mask, rlsd_token_mask, config
         captured["student_log_probs"] = student_log_probs.clone()
         return advantages, {}
 
@@ -102,8 +104,10 @@ def test_rlsd_actor_loss_uses_current_logprob_by_default(monkeypatch):
 def test_rlsd_actor_loss_can_use_old_logprob_when_configured(monkeypatch):
     captured = {}
 
-    def fake_compute_rlsd_advantages(*, teacher_log_probs, student_log_probs, advantages, response_mask, config):
-        del teacher_log_probs, response_mask, config
+    def fake_compute_rlsd_advantages(
+        *, teacher_log_probs, student_log_probs, advantages, response_mask, rlsd_token_mask, config
+    ):
+        del teacher_log_probs, response_mask, rlsd_token_mask, config
         captured["student_log_probs"] = student_log_probs.clone()
         return advantages, {}
 
@@ -119,8 +123,10 @@ def test_rlsd_actor_loss_can_use_old_logprob_when_configured(monkeypatch):
 def test_rlsd_actor_loss_uses_effective_lambda_from_batch_meta(monkeypatch):
     captured = {}
 
-    def fake_compute_rlsd_advantages(*, teacher_log_probs, student_log_probs, advantages, response_mask, config):
-        del teacher_log_probs, student_log_probs, response_mask
+    def fake_compute_rlsd_advantages(
+        *, teacher_log_probs, student_log_probs, advantages, response_mask, rlsd_token_mask, config
+    ):
+        del teacher_log_probs, student_log_probs, response_mask, rlsd_token_mask
         captured["lambda"] = config.lam
         return advantages, {"rlsd/effective_lambda": config.lam}
 

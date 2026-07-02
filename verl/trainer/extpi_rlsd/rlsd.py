@@ -46,6 +46,7 @@ def compute_rlsd_advantages(
     student_log_probs: torch.Tensor,
     advantages: torch.Tensor,
     response_mask: torch.Tensor,
+    rlsd_token_mask: torch.Tensor | None = None,
     config: RLSDConfig,
 ) -> tuple[torch.Tensor, dict[str, Any]]:
     """Reweight GRPO advantages using privileged teacher evidence.
@@ -65,8 +66,11 @@ def compute_rlsd_advantages(
         raise ValueError(
             "teacher_log_probs, student_log_probs, advantages, and response_mask must share the same shape"
         )
+    if rlsd_token_mask is not None and rlsd_token_mask.shape != response_mask.shape:
+        raise ValueError("rlsd_token_mask must share the same shape as response_mask")
 
     mask = _as_mask(response_mask, advantages)
+    credit_mask = mask if rlsd_token_mask is None else _as_mask(rlsd_token_mask, advantages) * mask
     delta = teacher_log_probs.detach() - student_log_probs.detach()
     sign_adv = torch.sign(advantages.detach())
     signed_delta = (sign_adv * delta).detach()
@@ -85,8 +89,9 @@ def compute_rlsd_advantages(
     log_low = math.log(1.0 - config.clip_range)
     log_high = math.log(1.0 + config.clip_range)
     clipped_log_weight = signed_delta.clamp(min=log_low, max=log_high)
-    clipped_weights = torch.exp(clipped_log_weight) * mask
-    reweight = ((1.0 - config.lam) + config.lam * clipped_weights) * mask
+    clipped_weights = torch.exp(clipped_log_weight)
+    rlsd_reweight = (1.0 - config.lam) + config.lam * clipped_weights
+    reweight = torch.where(credit_mask.bool(), rlsd_reweight, torch.ones_like(rlsd_reweight)) * mask
 
     if config.negative_only:
         seq_adv = (advantages.detach() * mask).sum(dim=-1, keepdim=True)
@@ -100,14 +105,17 @@ def compute_rlsd_advantages(
     metrics = {
         "rlsd/delta_mean": _masked_mean(delta, mask).detach().item(),
         "rlsd/delta_std": _masked_std(delta, mask).detach().item(),
-        "rlsd/log_weight_mean": _masked_mean(signed_delta, mask).detach().item(),
-        "rlsd/log_weight_std": _masked_std(signed_delta, mask).detach().item(),
-        "rlsd/weight_mean": _masked_mean(clipped_weights, mask).detach().item(),
-        "rlsd/weight_std": _masked_std(clipped_weights, mask).detach().item(),
-        "rlsd/clip_low_ratio": _masked_mean((signed_delta < log_low).to(dtype=advantages.dtype), mask).detach().item(),
-        "rlsd/clip_high_ratio": _masked_mean(
-            (signed_delta > log_high).to(dtype=advantages.dtype), mask
+        "rlsd/log_weight_mean": _masked_mean(signed_delta, credit_mask).detach().item(),
+        "rlsd/log_weight_std": _masked_std(signed_delta, credit_mask).detach().item(),
+        "rlsd/weight_mean": _masked_mean(clipped_weights, credit_mask).detach().item(),
+        "rlsd/weight_std": _masked_std(clipped_weights, credit_mask).detach().item(),
+        "rlsd/clip_low_ratio": _masked_mean(
+            (signed_delta < log_low).to(dtype=advantages.dtype), credit_mask
         ).detach().item(),
+        "rlsd/clip_high_ratio": _masked_mean(
+            (signed_delta > log_high).to(dtype=advantages.dtype), credit_mask
+        ).detach().item(),
+        "rlsd/token_mask_ratio": (credit_mask.sum() / mask.sum().clamp_min(1.0)).detach().item(),
         "rlsd/effective_lambda": config.lam,
         "rlsd/adv_abs_mean_before": _masked_mean(advantages.detach().abs(), mask).detach().item(),
         "rlsd/adv_abs_mean_after": _masked_mean(reweighted_advantages.detach().abs(), mask).detach().item(),

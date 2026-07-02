@@ -23,6 +23,7 @@ args=(
   --max_new_tokens "${MAX_NEW_TOKENS:-4096}"
   --temperature "${EVAL_TEMPERATURE:-1.0}"
   --top_p "${EVAL_TOP_P:-1.0}"
+  --pi_trace_field "${PI_TRACE_FIELD:-qwen32b_pi_trace}"
 )
 if [ -n "${CHECKPOINT_PATH}" ]; then
   args+=(--checkpoint "${CHECKPOINT_PATH}")

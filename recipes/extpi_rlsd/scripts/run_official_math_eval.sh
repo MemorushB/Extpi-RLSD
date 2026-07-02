@@ -38,6 +38,7 @@ for dataset in ${DATASETS}; do
     --max_new_tokens "${MAX_NEW_TOKENS:-38912}"
     --temperature "${EVAL_TEMPERATURE:-1.0}"
     --top_p "${EVAL_TOP_P:-1.0}"
+    --pi_trace_field "${PI_TRACE_FIELD:-qwen32b_pi_trace}"
     --tensor_parallel_size "${TENSOR_PARALLEL_SIZE:-1}"
     --gpu_memory_utilization "${GPU_MEMORY_UTILIZATION:-0.9}"
   )

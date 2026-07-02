@@ -76,6 +76,27 @@ def test_negative_only_changes_only_negative_sequences():
     assert not torch.allclose(out[1], advantages[1])
 
 
+def test_rlsd_token_mask_keeps_unmasked_tokens_on_grpo_advantage():
+    advantages = torch.tensor([[1.0, -2.0, 3.0, 4.0]])
+    teacher = torch.tensor([[10.0, -10.0, 10.0, 10.0]])
+    old = torch.zeros_like(teacher)
+    response_mask = torch.tensor([[1, 1, 1, 0]])
+    rlsd_token_mask = torch.tensor([[1, 0, 1, 1]])
+
+    out, metrics = compute_rlsd_advantages(
+        teacher_log_probs=teacher,
+        student_log_probs=old,
+        advantages=advantages,
+        response_mask=response_mask,
+        rlsd_token_mask=rlsd_token_mask,
+        config=RLSDConfig(lam=0.5, clip_range=0.2),
+    )
+
+    assert out[0, 1].item() == advantages[0, 1].item()
+    assert out[0, 3].item() == 0.0
+    assert abs(metrics["rlsd/token_mask_ratio"] - 2 / 3) < 1e-6
+
+
 def test_rlsd_teacher_and_old_logprobs_are_stop_gradient():
     advantages = torch.tensor([[1.0, -2.0]], requires_grad=True)
     teacher = torch.tensor([[0.7, -0.3]], requires_grad=True)

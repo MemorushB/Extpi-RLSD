@@ -5,6 +5,7 @@ from omegaconf import OmegaConf
 from verl import DataProto
 from verl.trainer.extpi_rlsd.trainer import (
     ExtPIRLSDRayPPOTrainer,
+    _build_rlsd_token_mask,
     build_direct_opd_teacher_score_batch,
     build_pi_teacher_score_batch,
 )
@@ -38,8 +39,8 @@ def _source_batch():
         non_tensors={
             "extra_info": np.array(
                 [
-                    {"id": "a", "problem": "1+1?", "qwen8b_pi_trace": "trace a"},
-                    {"id": "b", "problem": "2+2?", "qwen8b_pi_trace": "trace b"},
+                    {"id": "a", "problem": "1+1?", "qwen32b_pi_trace": "trace a"},
+                    {"id": "b", "problem": "2+2?", "qwen32b_pi_trace": "trace b"},
                 ],
                 dtype=object,
             ),
@@ -71,6 +72,26 @@ def test_pi_teacher_score_batch_preserves_original_response_ids():
     assert all("trace" in prompt for prompt in built.prompts)
 
 
+def test_pi_teacher_score_batch_supports_explicit_legacy_trace_field():
+    batch = _source_batch()
+    batch.non_tensor_batch["extra_info"] = np.array(
+        [
+            {"id": "a", "problem": "1+1?", "qwen8b_pi_trace": "legacy trace a"},
+            {"id": "b", "problem": "2+2?", "qwen8b_pi_trace": "legacy trace b"},
+        ],
+        dtype=object,
+    )
+
+    built = build_pi_teacher_score_batch(
+        source_batch=batch,
+        tokenizer=FakeTokenizer(),
+        max_prompt_length=256,
+        pi_trace_field="qwen8b_pi_trace",
+    )
+
+    assert all("legacy trace" in prompt for prompt in built.prompts)
+
+
 def test_pi_teacher_prefixes_are_left_padded_even_if_tokenizer_default_is_right():
     class RightPadTokenizer(FakeTokenizer):
         padding_side = "right"
@@ -87,6 +108,20 @@ def test_pi_teacher_prefixes_are_left_padded_even_if_tokenizer_default_is_right(
         first_real = int(row.nonzero()[0].item())
         assert not row[:first_real].any()
         assert row[first_real:].all()
+
+
+def test_rlsd_token_mask_4k_plus_answer_uses_prefix_and_tail_without_padding():
+    response_mask = torch.tensor([[1] * 5000 + [0] * 2])
+
+    token_mask = _build_rlsd_token_mask(response_mask, "4k+ans")
+
+    assert token_mask[0, 0].item() == 1
+    assert token_mask[0, 4095].item() == 1
+    assert token_mask[0, 4096].item() == 0
+    assert token_mask[0, 4743].item() == 0
+    assert token_mask[0, 4744].item() == 1
+    assert token_mask[0, 4999].item() == 1
+    assert token_mask[0, 5000].item() == 0
 
 
 def test_direct_opd_teacher_score_batch_reuses_student_prompt_tokens():
@@ -406,11 +441,11 @@ def test_direct_opd_hook_injects_teacher_log_probs_from_inline_scorer():
 
 def test_extpi_score_batch_requires_pi_trace():
     batch = _source_batch()
-    batch.non_tensor_batch["extra_info"][0] = {"id": "a", "problem": "1+1?", "qwen8b_pi_trace": None}
+    batch.non_tensor_batch["extra_info"][0] = {"id": "a", "problem": "1+1?", "qwen32b_pi_trace": None}
     try:
         build_pi_teacher_score_batch(source_batch=batch, tokenizer=FakeTokenizer(), max_prompt_length=256)
     except ValueError as exc:
-        assert "qwen8b_pi_trace" in str(exc)
+        assert "qwen32b_pi_trace" in str(exc)
         return
     raise AssertionError("Expected missing PI trace to fail")
 

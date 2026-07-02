@@ -93,6 +93,8 @@ def ppo_loss(config: ActorConfig, model_output, data: TensorDict, dp_group=None)
         if "teacher_pi_log_probs" not in data:
             raise ValueError("actor.policy_loss.rlsd_enabled=True requires teacher_pi_log_probs in the update batch")
         fields.append("teacher_pi_log_probs")
+        if "rlsd_token_mask" in data:
+            fields.append("rlsd_token_mask")
     if opd_pg_enabled:
         if "teacher_opd_log_probs" not in data:
             raise ValueError("actor.policy_loss.opd_pg_enabled=True requires teacher_opd_log_probs in the update batch")
@@ -128,6 +130,7 @@ def ppo_loss(config: ActorConfig, model_output, data: TensorDict, dp_group=None)
             student_log_probs=rlsd_student_log_probs,
             advantages=advantages,
             response_mask=response_mask,
+            rlsd_token_mask=data.get("rlsd_token_mask", None),
             config=RLSDConfig(
                 lam=float(rlsd_effective_lambda),
                 clip_range=float(config.policy_loss.get("rlsd_reweight_clip_range", 0.2)),

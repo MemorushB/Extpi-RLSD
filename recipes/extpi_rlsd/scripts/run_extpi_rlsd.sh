@@ -13,9 +13,11 @@ RLSD_LAMBDA="${RLSD_LAMBDA:-0.5}"
 RLSD_LAMBDA_WARMUP_STEPS="${RLSD_LAMBDA_WARMUP_STEPS:-0}"
 RLSD_LAMBDA_DECAY_STEPS="${RLSD_LAMBDA_DECAY_STEPS:-0}"
 RLSD_CLIP_RANGE="${RLSD_CLIP_RANGE:-0.2}"
+RLSD_TOKEN_MASK="${RLSD_TOKEN_MASK:-all}"
 TEACHER_MAX_PROMPT_LENGTH="${TEACHER_MAX_PROMPT_LENGTH:-2048}"
 TEACHER_UPDATE_MODE="${TEACHER_UPDATE_MODE:-base_no_adapter}"
 TEACHER_SYNC_INTERVAL="${TEACHER_SYNC_INTERVAL:-20}"
+PI_TRACE_FIELD="${PI_TRACE_FIELD:-qwen32b_pi_trace}"
 EXTPI_TEACHER_ADAPTER=False
 
 case "${TEACHER_UPDATE_MODE}" in
@@ -40,9 +42,17 @@ write_extpi_run_manifest "${EXPERIMENT_NAME}" \
   --config_kv "rlsd_lambda_warmup_steps=${RLSD_LAMBDA_WARMUP_STEPS}" \
   --config_kv "rlsd_lambda_decay_steps=${RLSD_LAMBDA_DECAY_STEPS}" \
   --config_kv "rlsd_clip_range=${RLSD_CLIP_RANGE}" \
+  --config_kv "rlsd_negative_only=${RLSD_NEGATIVE_ONLY:-False}" \
+  --config_kv "rlsd_token_mask=${RLSD_TOKEN_MASK}" \
+  --config_kv "hparam_run_id=${HPARAM_RUN_ID:-}" \
   --config_kv "teacher_update_mode=${TEACHER_UPDATE_MODE}" \
   --config_kv "teacher_sync_interval=${TEACHER_SYNC_INTERVAL}" \
   --config_kv "teacher_max_prompt_length=${TEACHER_MAX_PROMPT_LENGTH}" \
+  --config_kv "pi_trace_field=${PI_TRACE_FIELD}" \
+  --config_kv "train_batch_size=${TRAIN_BATCH_SIZE:-8}" \
+  --config_kv "max_response_length=${MAX_RESPONSE_LENGTH:-1024}" \
+  --config_kv "actor_lr=${ACTOR_LR:-3e-6}" \
+  --config_kv "ppo_mini_batch_size=${PPO_MINI_BATCH_SIZE:-8}" \
   --config_kv "total_training_steps=${TOTAL_TRAINING_STEPS:-5}" \
   --config_kv "rollout_n=${ROLLOUT_N:-4}"
 
@@ -80,6 +90,7 @@ python3 -m verl.trainer.extpi_rlsd.main_extpi_rlsd \
   actor_rollout_ref.actor.policy_loss.rlsd_lambda_decay_steps="${RLSD_LAMBDA_DECAY_STEPS}" \
   actor_rollout_ref.actor.policy_loss.rlsd_reweight_clip_range="${RLSD_CLIP_RANGE}" \
   actor_rollout_ref.actor.policy_loss.rlsd_negative_only="${RLSD_NEGATIVE_ONLY:-False}" \
+  actor_rollout_ref.actor.policy_loss.rlsd_token_mask="${RLSD_TOKEN_MASK}" \
   actor_rollout_ref.rollout.name=vllm \
   actor_rollout_ref.rollout.n="${ROLLOUT_N:-4}" \
   actor_rollout_ref.rollout.temperature=1.0 \
@@ -92,6 +103,7 @@ python3 -m verl.trainer.extpi_rlsd.main_extpi_rlsd \
   +extpi_rlsd.teacher_update_mode="${TEACHER_UPDATE_MODE}" \
   +extpi_rlsd.teacher_sync_interval="${TEACHER_SYNC_INTERVAL}" \
   +extpi_rlsd.teacher_max_prompt_length="${TEACHER_MAX_PROMPT_LENGTH}" \
+  +extpi_rlsd.pi_trace_field="${PI_TRACE_FIELD}" \
   +extpi_rlsd.allow_teacher_prompt_truncation="${ALLOW_TEACHER_PROMPT_TRUNCATION:-True}" \
   +extpi_rlsd.online_teacher_thinking=False \
   trainer.project_name="${PROJECT_NAME}" \

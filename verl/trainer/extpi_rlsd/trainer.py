@@ -12,6 +12,7 @@ from omegaconf import OmegaConf
 
 from verl import DataProto
 from verl.trainer.extpi_rlsd.prompt_assembly import (
+    DEFAULT_PI_TRACE_FIELD,
     assert_no_pi_in_student_prompt,
     build_pi_teacher_prompt,
 )
@@ -114,6 +115,7 @@ def build_pi_teacher_score_batch(
     max_prompt_length: int,
     allow_prompt_truncation: bool = True,
     teacher_thinking: bool = False,
+    pi_trace_field: str = DEFAULT_PI_TRACE_FIELD,
 ) -> PiTeacherBatchBuild:
     """Build a temporary batch that scores original responses under PI prefixes."""
 
@@ -121,7 +123,7 @@ def build_pi_teacher_score_batch(
         if key not in source_batch.batch:
             raise ValueError(f"source batch is missing required tensor key {key!r}")
     if "extra_info" not in source_batch.non_tensor_batch:
-        raise ValueError("ExtPI-RLSD requires extra_info with problem and qwen8b_pi_trace")
+        raise ValueError(f"ExtPI-RLSD requires extra_info with problem and {pi_trace_field}")
 
     extra_infos = [_as_dict(item) for item in source_batch.non_tensor_batch["extra_info"]]
     raw_prompts = source_batch.non_tensor_batch.get("raw_prompt")
@@ -131,7 +133,7 @@ def build_pi_teacher_score_batch(
     leak_count = 0
     for row_idx, extra in enumerate(extra_infos):
         problem = extra.get("problem")
-        trace = extra.get("qwen8b_pi_trace")
+        trace = extra.get(pi_trace_field)
         sample_id = str(extra.get("id", row_idx))
         if not problem:
             raise ValueError(f"ExtPI-RLSD sample {sample_id} is missing extra_info.problem")
@@ -155,7 +157,7 @@ def build_pi_teacher_score_batch(
         )
     if missing_trace_ids:
         preview = ", ".join(missing_trace_ids[:5])
-        raise ValueError(f"ExtPI-RLSD requires qwen8b_pi_trace for every sample; missing ids: {preview}")
+        raise ValueError(f"ExtPI-RLSD requires {pi_trace_field} for every sample; missing ids: {preview}")
 
     pad_token_id = getattr(tokenizer, "pad_token_id", None)
     if pad_token_id is None:
@@ -301,6 +303,42 @@ def _group_diagnostic_metrics(
     }, False, True
 
 
+def _build_rlsd_token_mask(response_mask: torch.Tensor, spec: str) -> torch.Tensor:
+    """Build a response-token mask for RLSD credit reweighting without decoding text."""
+
+    normalized = str(spec or "all").strip().lower().replace("_", "-")
+    aliases = {
+        "all": None,
+        "all8k": None,
+        "all-8k": None,
+        "2k+ans": 2048,
+        "first2k+tail256": 2048,
+        "first-2k+tail-256": 2048,
+        "4k+ans": 4096,
+        "first4k+tail256": 4096,
+        "first-4k+tail-256": 4096,
+        "6k+ans": 6144,
+        "first6k+tail256": 6144,
+        "first-6k+tail-256": 6144,
+    }
+    if normalized not in aliases:
+        raise ValueError(
+            "actor.policy_loss.rlsd_token_mask must be one of "
+            "all, all8k, 2k+ans, 4k+ans, or 6k+ans; "
+            f"got {spec!r}"
+        )
+    first_k = aliases[normalized]
+    mask = response_mask.bool()
+    if first_k is None:
+        return mask.long()
+
+    token_index = mask.long().cumsum(dim=-1)
+    valid_lengths = mask.long().sum(dim=-1, keepdim=True)
+    first_mask = token_index <= first_k
+    tail_mask = token_index > (valid_lengths - 256).clamp_min(0)
+    return (mask & (first_mask | tail_mask)).long()
+
+
 class ExtPIRLSDRayPPOTrainer(RayPPOTrainer):
     """Legacy PPO trainer that injects PI teacher logprobs for RLSD updates."""
 
@@ -420,6 +458,8 @@ class ExtPIRLSDRayPPOTrainer(RayPPOTrainer):
             metrics["train/step_student_tokens"] = float(response_mask.sum().detach().item())
             metrics["train/response_length_mean"] = response_lengths.mean().detach().item()
             metrics["train/truncation_proxy_last_token_ratio"] = response_mask[:, -1].float().mean().detach().item()
+            metrics["response_length/mean"] = metrics["train/response_length_mean"]
+            metrics["response_length/clip_ratio"] = metrics["train/truncation_proxy_last_token_ratio"]
         if "token_level_scores" not in batch.batch or "response_mask" not in batch.batch:
             return
         rollout_n = int(self.config.actor_rollout_ref.rollout.n)
@@ -576,18 +616,28 @@ class ExtPIRLSDRayPPOTrainer(RayPPOTrainer):
         effective_lambda = self._compute_effective_rlsd_lambda(policy_loss)
         batch.meta_info["rlsd_effective_lambda"] = effective_lambda
         metrics["rlsd/effective_lambda"] = effective_lambda
+        rlsd_token_mask_spec = str(policy_loss.get("rlsd_token_mask", "all"))
+        batch.batch["rlsd_token_mask"] = _build_rlsd_token_mask(batch.batch["response_mask"], rlsd_token_mask_spec).to(
+            device=batch.batch["response_mask"].device
+        )
+        metrics["rlsd/token_mask_ratio"] = (
+            batch.batch["rlsd_token_mask"].sum()
+            / batch.batch["response_mask"].to(batch.batch["rlsd_token_mask"]).sum().clamp_min(1)
+        ).detach().item()
 
         teacher_update_mode = str(extpi_config.get("teacher_update_mode", "base_no_adapter")).lower()
 
         max_prompt_length = int(extpi_config.get("teacher_max_prompt_length", self.config.data.max_prompt_length))
         allow_truncation = bool(extpi_config.get("allow_teacher_prompt_truncation", True))
         teacher_thinking = bool(extpi_config.get("online_teacher_thinking", False))
+        pi_trace_field = str(extpi_config.get("pi_trace_field", DEFAULT_PI_TRACE_FIELD))
         build = build_pi_teacher_score_batch(
             source_batch=batch,
             tokenizer=self.tokenizer,
             max_prompt_length=max_prompt_length,
             allow_prompt_truncation=allow_truncation,
             teacher_thinking=teacher_thinking,
+            pi_trace_field=pi_trace_field,
         )
         teacher_ref = self._compute_pi_teacher_log_prob(
             build.batch,
@@ -608,7 +658,13 @@ class ExtPIRLSDRayPPOTrainer(RayPPOTrainer):
 
         mask = batch.batch["response_mask"].bool()
         metrics.update(build.metrics)
-        metrics["train/step_teacher_tokens"] = metrics["extpi/pi_teacher_response_tokens"]
+        metrics["extpi/pi_trace_field_is_qwen32b"] = 1.0 if pi_trace_field == DEFAULT_PI_TRACE_FIELD else 0.0
+        metrics["extpi/pi_teacher_prompt_tokens_total"] = metrics["extpi/pi_teacher_prompt_tokens_mean"] * float(
+            batch.batch["response_mask"].shape[0]
+        )
+        metrics["train/step_teacher_tokens"] = (
+            metrics["extpi/pi_teacher_prompt_tokens_total"] + metrics["extpi/pi_teacher_response_tokens"]
+        )
         metrics["extpi/teacher_pi_logp_mean"] = masked_mean(teacher_log_probs, mask).detach().item()
         metrics["extpi/teacher_pi_delta_mean"] = masked_mean(
             teacher_log_probs - batch.batch["old_log_probs"], mask

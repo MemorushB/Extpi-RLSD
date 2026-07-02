@@ -93,6 +93,9 @@ policy_loss:
   # Whether RLSD only reweights negative-advantage sequences
   rlsd_negative_only: false
 
+  # RLSD response-token mask: all, all8k, 2k+ans, 4k+ans, or 6k+ans
+  rlsd_token_mask: all
+
   # Student logprob source for RLSD delta: current or old
   rlsd_delta_student_logp_source: current
 

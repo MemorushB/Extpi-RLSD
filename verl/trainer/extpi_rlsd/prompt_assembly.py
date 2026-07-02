@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+DEFAULT_PI_TRACE_FIELD = "qwen32b_pi_trace"
+
 STUDENT_USER_TEMPLATE = """Solve the following mathematics problem. Give a concise, self-contained derivation.
 End with the final answer in \\boxed{{...}}.
 
@@ -18,7 +20,7 @@ A verified reference solution from another solver is provided below. Use it only
 private guidance. Do not quote it or mention that a reference was provided.
 
 <reference_solution>
-{qwen8b_pi_trace}
+{pi_trace}
 </reference_solution>"""
 
 CLOSED_TEACHER_USER_TEMPLATE = """Solve the following mathematics problem. Give a concise, self-contained derivation.
@@ -65,7 +67,7 @@ def build_direct_opd_teacher_prompt(tokenizer, problem: str, *, enable_thinking:
 def build_pi_teacher_prompt(
     tokenizer,
     problem: str,
-    qwen8b_pi_trace: str,
+    pi_trace: str,
     *,
     enable_thinking: bool = False,
 ) -> str:
@@ -73,7 +75,7 @@ def build_pi_teacher_prompt(
 
     return _render_chat(
         tokenizer,
-        PI_TEACHER_USER_TEMPLATE.format(problem=problem, qwen8b_pi_trace=qwen8b_pi_trace),
+        PI_TEACHER_USER_TEMPLATE.format(problem=problem, pi_trace=pi_trace),
         enable_thinking=enable_thinking,
     )
 
@@ -81,7 +83,7 @@ def build_pi_teacher_prompt(
 def build_prompt_bundle(
     tokenizer,
     problem: str,
-    qwen8b_pi_trace: str | None,
+    pi_trace: str | None,
     *,
     student_thinking: bool = False,
     teacher_thinking: bool = False,
@@ -91,11 +93,11 @@ def build_prompt_bundle(
     student_prompt = build_student_prompt(tokenizer, problem, enable_thinking=student_thinking)
     direct_prompt = build_direct_opd_teacher_prompt(tokenizer, problem, enable_thinking=teacher_thinking)
     pi_prompt = None
-    if qwen8b_pi_trace:
+    if pi_trace:
         pi_prompt = build_pi_teacher_prompt(
             tokenizer,
             problem,
-            qwen8b_pi_trace,
+            pi_trace,
             enable_thinking=teacher_thinking,
         )
     return PromptBundle(

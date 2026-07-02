@@ -7,6 +7,8 @@ rlsd:
   lambda_warmup_steps: 0
   lambda_decay_steps: 0
   negative_only: false
+  token_mask: all
   thought_only: false
   teacher_update_mode: base_no_adapter
   teacher_sync_interval: 20
+  pi_trace_field: qwen32b_pi_trace

@@ -9,8 +9,13 @@ from typing import Any
 
 from recipes.extpi_rlsd.rewards.math_verify_reward import extract_boxed_answer, verify_answer
 from tools.extpi_rlsd.common import read_jsonl, write_json, write_jsonl
+from verl.trainer.extpi_rlsd.prompt_assembly import DEFAULT_PI_TRACE_FIELD
 
 TEXT_KEYS = ("completion", "response", "solution_str", "text", "output")
+
+
+def _verified_field(trace_field: str) -> str:
+    return trace_field.replace("_trace", "_verified") if trace_field.endswith("_trace") else f"{trace_field}_verified"
 
 
 def _sample_id(row: dict[str, Any]) -> str:
@@ -65,7 +70,9 @@ def main() -> None:
     parser.add_argument("--output_jsonl", required=True)
     parser.add_argument("--manifest", default=None)
     parser.add_argument("--expected_samples", type=int, default=4)
+    parser.add_argument("--pi_trace_field", default=DEFAULT_PI_TRACE_FIELD)
     args = parser.parse_args()
+    pi_verified_field = _verified_field(args.pi_trace_field)
 
     base_rows = read_jsonl(args.input_jsonl)
     plain = _group_completions(args.plain_jsonl)
@@ -120,7 +127,7 @@ def main() -> None:
         if uplift > 0:
             stats["with_uplift_positive"] += 1
         if (
-            bool(new_row.get("qwen8b_pi_verified", False))
+            bool(new_row.get(pi_verified_field, False))
             and not any_truncated
             and p_plain in {0.25, 0.5, 0.75}
             and p_pi >= 0.75
@@ -128,7 +135,7 @@ def main() -> None:
         ):
             stats["strict_frontier_eligible"] += 1
         if (
-            bool(new_row.get("qwen8b_pi_verified", False))
+            bool(new_row.get(pi_verified_field, False))
             and not any_truncated
             and 0.1 <= p_plain <= 0.75
             and uplift > 0
@@ -146,6 +153,7 @@ def main() -> None:
                 "pi_jsonl": args.pi_jsonl,
                 "output_jsonl": args.output_jsonl,
                 "expected_samples": args.expected_samples,
+                "pi_trace_field": args.pi_trace_field,
                 "stats": stats,
             },
         )

@@ -73,7 +73,7 @@ gpu6 guard. Set `CUDA_VISIBLE_DEVICES` explicitly before using them.
 
 ## Data Flow
 
-Prepare OPSD, generate verified Qwen3-8B PI traces, attach recipient uplift
+Prepare OPSD, generate verified Qwen3-32B PI traces, attach recipient uplift
 statistics, and build frontier splits:
 
 ```bash
@@ -85,6 +85,10 @@ bash recipes/extpi_rlsd/scripts/01_generate_qwen8b_pi.sh
 bash recipes/extpi_rlsd/scripts/01b_generate_recipient_uplift_completions.sh
 bash recipes/extpi_rlsd/scripts/03_build_frontier.sh
 ```
+
+ExtPI/UPOD consumers default to `PI_TRACE_FIELD=qwen32b_pi_trace`. Set
+`PI_TRACE_FIELD=qwen8b_pi_trace` only when intentionally running legacy 8B
+trace data through the same pipeline.
 
 For local development only, `ALLOW_MISSING_EVAL_CONTAMINATION=1` lets
 `00_prepare_dataset.sh` run without eval contamination files. Official splits
@@ -123,6 +127,21 @@ hook that materializes `teacher_pi_log_probs`.
 `run_closed_sft.sh` is the off-policy SFT baseline entrypoint. It runs parquet
 preflight by default (`SFT_PREFLIGHT=1`) and defaults to
 `MAX_SEQUENCE_LENGTH=8192`.
+
+## Hyperparameter Tuning
+
+The UPOD tuning matrix lives at `experiments/extpi_rlsd/hparam_matrix.csv`.
+Launch exactly one run at a time:
+
+```bash
+RUN_ID=R1-01 bash recipes/extpi_rlsd/scripts/launch_hparam_matrix.sh
+```
+
+The launcher defaults to gpu6, writes local metrics to
+`${EXTPI_DATA_ROOT}/outputs/hparams/${RUN_ID}/metrics.jsonl`, runs matched-dev
+proxy eval with `n=4`, fixed seeds `0,1,2,3`, `max_new_tokens=8192`, and writes
+`summary.json` plus the aggregate hparam `summary.csv`. It never runs official
+eval.
 
 ## Multi-GPU Entrypoints
 

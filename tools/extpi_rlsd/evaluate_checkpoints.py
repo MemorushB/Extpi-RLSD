@@ -12,7 +12,7 @@ from typing import Any
 
 from recipes.extpi_rlsd.rewards.math_verify_reward import compute_score, verify_answer
 from tools.extpi_rlsd.common import read_jsonl
-from verl.trainer.extpi_rlsd.prompt_assembly import STUDENT_USER_TEMPLATE
+from verl.trainer.extpi_rlsd.prompt_assembly import DEFAULT_PI_TRACE_FIELD, STUDENT_USER_TEMPLATE
 
 
 @dataclass
@@ -45,7 +45,11 @@ def _load_raw_rows(path: str | Path) -> list[dict[str, Any]]:
     return read_jsonl(path)
 
 
-def load_eval_items(path: str | Path, max_rows: int | None = None) -> list[EvalItem]:
+def load_eval_items(
+    path: str | Path,
+    max_rows: int | None = None,
+    pi_trace_field: str = DEFAULT_PI_TRACE_FIELD,
+) -> list[EvalItem]:
     rows = _load_raw_rows(path)
     if max_rows is not None:
         rows = rows[:max_rows]
@@ -71,7 +75,7 @@ def load_eval_items(path: str | Path, max_rows: int | None = None) -> list[EvalI
                 problem=str(problem),
                 ground_truth=str(ground_truth),
                 messages=[{"role": str(msg["role"]), "content": str(msg["content"])} for msg in messages],
-                pi_trace=extra_info.get("qwen8b_pi_trace") or row.get("qwen8b_pi_trace"),
+                pi_trace=extra_info.get(pi_trace_field) or row.get(pi_trace_field),
             )
         )
     return items
@@ -361,11 +365,12 @@ def main() -> None:
     parser.add_argument("--trust_remote_code", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--attn_implementation", default="flash_attention_2")
     parser.add_argument("--dataset_name", default=None)
+    parser.add_argument("--pi_trace_field", default=DEFAULT_PI_TRACE_FIELD)
     parser.add_argument("--tensor_parallel_size", type=int, default=1)
     parser.add_argument("--gpu_memory_utilization", type=float, default=0.9)
     args = parser.parse_args()
 
-    items = load_eval_items(args.eval_file, max_rows=args.max_rows)
+    items = load_eval_items(args.eval_file, max_rows=args.max_rows, pi_trace_field=args.pi_trace_field)
     scored_items = _evaluate_vllm(args, items) if args.backend == "vllm" else _evaluate_hf(args, items)
     payload = summarize_scored_items(
         run=args.run or Path(args.checkpoint or args.model).name,
@@ -374,6 +379,7 @@ def main() -> None:
     )
     payload["eval_file"] = args.eval_file
     payload["dataset"] = args.dataset_name or Path(args.eval_file).stem
+    payload["pi_trace_field"] = args.pi_trace_field
     payload["model"] = args.model
     payload["checkpoint_path"] = args.checkpoint
     payload["adapter_path"] = args.adapter_path

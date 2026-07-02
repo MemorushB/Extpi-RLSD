@@ -41,6 +41,7 @@ def test_actor_yaml_has_extpi_policy_loss_keys():
         "rlsd_lambda_decay_steps",
         "rlsd_reweight_clip_range",
         "rlsd_negative_only",
+        "rlsd_token_mask",
         "rlsd_delta_student_logp_source",
         "opd_pg_enabled",
         "opd_logratio_clip_abs",
@@ -98,7 +99,17 @@ def test_extpi_scripts_expose_teacher_modes_and_lambda_schedule():
         assert 'TEACHER_SYNC_INTERVAL="${TEACHER_SYNC_INTERVAL:-20}"' in text
         assert 'actor_rollout_ref.actor.policy_loss.rlsd_lambda_warmup_steps="${RLSD_LAMBDA_WARMUP_STEPS}"' in text
         assert 'actor_rollout_ref.actor.policy_loss.rlsd_lambda_decay_steps="${RLSD_LAMBDA_DECAY_STEPS}"' in text
+        assert 'actor_rollout_ref.actor.policy_loss.rlsd_token_mask="${RLSD_TOKEN_MASK}"' in text
         assert '+extpi_rlsd.teacher_sync_interval="${TEACHER_SYNC_INTERVAL}"' in text
+        assert '+extpi_rlsd.pi_trace_field="${PI_TRACE_FIELD}"' in text
+
+
+def test_hparam_launcher_runs_one_id_with_file_logger():
+    text = _read_script("launch_hparam_matrix.sh")
+    assert "RUN_ID" in text
+    assert "export-env" in text
+    assert 'TRAINER_LOGGER="${TRAINER_LOGGER:-[\\"console\\",\\"wandb\\",\\"file\\"]}"' in text
+    assert "run_official_math_eval.sh" not in text
 
 
 def test_env_multi_rejects_single_gpu():

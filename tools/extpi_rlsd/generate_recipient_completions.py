@@ -9,7 +9,11 @@ from typing import Any
 
 from recipes.extpi_rlsd.rewards.math_verify_reward import extract_boxed_answer, verify_answer
 from tools.extpi_rlsd.common import enforce_gpu6, read_jsonl, write_jsonl
-from verl.trainer.extpi_rlsd.prompt_assembly import PI_TEACHER_USER_TEMPLATE, STUDENT_USER_TEMPLATE
+from verl.trainer.extpi_rlsd.prompt_assembly import (
+    DEFAULT_PI_TRACE_FIELD,
+    PI_TEACHER_USER_TEMPLATE,
+    STUDENT_USER_TEMPLATE,
+)
 
 
 def parse_seeds(value: str) -> list[int]:
@@ -19,30 +23,42 @@ def parse_seeds(value: str) -> list[int]:
     return seeds
 
 
-def build_messages(row: dict[str, Any], mode: str) -> list[dict[str, str]]:
+def _verified_field(trace_field: str) -> str:
+    return trace_field.replace("_trace", "_verified") if trace_field.endswith("_trace") else f"{trace_field}_verified"
+
+
+def build_messages(row: dict[str, Any], mode: str, pi_trace_field: str) -> list[dict[str, str]]:
     problem = str(row["problem"])
     if mode == "plain":
         content = STUDENT_USER_TEMPLATE.format(problem=problem)
     elif mode == "pi":
-        trace = row.get("qwen8b_pi_trace")
+        trace = row.get(pi_trace_field)
         if not trace:
-            raise ValueError(f"PI completion requested for row without qwen8b_pi_trace: {row.get('id')}")
-        content = PI_TEACHER_USER_TEMPLATE.format(problem=problem, qwen8b_pi_trace=str(trace))
+            raise ValueError(f"PI completion requested for row without {pi_trace_field}: {row.get('id')}")
+        content = PI_TEACHER_USER_TEMPLATE.format(problem=problem, pi_trace=str(trace))
     else:
         raise ValueError(f"Unknown mode: {mode}")
     return [{"role": "user", "content": content}]
 
 
-def build_prompts(tokenizer: Any, rows: list[dict[str, Any]], mode: str, enable_thinking: bool) -> list[str]:
+def build_prompts(
+    tokenizer: Any,
+    rows: list[dict[str, Any]],
+    mode: str,
+    enable_thinking: bool,
+    pi_trace_field: str,
+) -> list[str]:
     prompts = []
     for row in rows:
         kwargs = {"tokenize": False, "add_generation_prompt": True}
         try:
             prompts.append(
-                tokenizer.apply_chat_template(build_messages(row, mode), enable_thinking=enable_thinking, **kwargs)
+                tokenizer.apply_chat_template(
+                    build_messages(row, mode, pi_trace_field), enable_thinking=enable_thinking, **kwargs
+                )
             )
         except TypeError:
-            prompts.append(tokenizer.apply_chat_template(build_messages(row, mode), **kwargs))
+            prompts.append(tokenizer.apply_chat_template(build_messages(row, mode, pi_trace_field), **kwargs))
     return prompts
 
 
@@ -66,7 +82,13 @@ def _generate_vllm(args: argparse.Namespace, rows: list[dict[str, Any]], seeds: 
     from vllm import LLM, SamplingParams
 
     tokenizer = AutoTokenizer.from_pretrained(args.model, trust_remote_code=args.trust_remote_code)
-    prompts = build_prompts(tokenizer, rows, args.mode, enable_thinking=args.enable_thinking)
+    prompts = build_prompts(
+        tokenizer,
+        rows,
+        args.mode,
+        enable_thinking=args.enable_thinking,
+        pi_trace_field=args.pi_trace_field,
+    )
     llm = LLM(
         model=args.model,
         trust_remote_code=args.trust_remote_code,
@@ -109,7 +131,13 @@ def _generate_hf(args: argparse.Namespace, rows: list[dict[str, Any]], seeds: li
         device_map="auto",
     )
     model.eval()
-    prompts = build_prompts(tokenizer, rows, args.mode, enable_thinking=args.enable_thinking)
+    prompts = build_prompts(
+        tokenizer,
+        rows,
+        args.mode,
+        enable_thinking=args.enable_thinking,
+        pi_trace_field=args.pi_trace_field,
+    )
     device = next(model.parameters()).device
     records = []
     for row, prompt in zip(rows, prompts, strict=True):
@@ -157,6 +185,7 @@ def main() -> None:
     parser.add_argument("--temperature", type=float, default=1.0)
     parser.add_argument("--top_p", type=float, default=1.0)
     parser.add_argument("--max_new_tokens", type=int, default=1024)
+    parser.add_argument("--pi_trace_field", default=DEFAULT_PI_TRACE_FIELD)
     parser.add_argument("--gpu_memory_utilization", type=float, default=0.5)
     parser.add_argument("--enable_thinking", action="store_true")
     parser.add_argument("--trust_remote_code", action=argparse.BooleanOptionalAction, default=True)
@@ -166,7 +195,8 @@ def main() -> None:
     enforce_gpu6()
     rows = read_jsonl(args.input_jsonl)
     if args.mode == "pi":
-        rows = [row for row in rows if bool(row.get("qwen8b_pi_verified", False)) and row.get("qwen8b_pi_trace")]
+        pi_verified_field = _verified_field(args.pi_trace_field)
+        rows = [row for row in rows if bool(row.get(pi_verified_field, False)) and row.get(args.pi_trace_field)]
     if args.max_rows is not None:
         rows = rows[: args.max_rows]
     seeds = parse_seeds(args.seeds)
